@@ -18,5 +18,3 @@ visible and the integration plan is concrete.
   (`apiURL: https://chainscan.0g.ai/open/api`). Verified contracts are required
   for the Wave 3 rubric.
 - Deploy wallet = a deploy-only hot wallet, funded minimally.
-
-See [`docs/0g-integration.md`](../docs/0g-integration.md) for the full forward plan.

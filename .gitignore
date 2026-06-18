@@ -35,3 +35,10 @@ coverage/
 /Lumen-Build-Guide.md
 /Lumen-Claude-Code-Master-Prompt.md
 /Lumen-Wave1-Submission.md
+
+# internal docs (kept local, not public-facing)
+/CLAUDE.md
+/docs/0g-integration.md
+/docs/architecture.md
+/docs/privacy-model.md
+/docs/wave-submissions/

@@ -11,7 +11,7 @@ payment verification out-of-band in Waves 3–4). The inference abstraction alre
 lives behind [`apps/web/lib/0g/compute.ts`](../../apps/web/lib/0g/compute.ts), so
 the extraction is a lift-and-shift, not a rewrite.
 
-**Why the gateway exists:** it keeps the 0G Compute API key off the client. See
-the honest threat model in [`docs/privacy-model.md`](../../docs/privacy-model.md) —
-in Waves 1–2 this gateway is technically in the plaintext path for the inference
-call; Wave 3 removes it from that path via wallet-signed inference.
+**Why the gateway exists:** it keeps the 0G Compute API key off the client. In
+Waves 1–2 this gateway is technically in the plaintext path for the inference
+call (it stores no entries and logs no content); Wave 3 removes it from that path
+via wallet-signed inference.

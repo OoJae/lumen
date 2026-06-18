@@ -48,10 +48,6 @@ Client (Next.js PWA)  ──prompt──▶  Gateway (Next API route, holds key)
   · client-side crypto               · logs no content
 ```
 
-Full diagram + data flow: [`docs/architecture.md`](docs/architecture.md). Honest
-threat model: [`docs/privacy-model.md`](docs/privacy-model.md). 0G specifics
-(verified) + forward plan: [`docs/0g-integration.md`](docs/0g-integration.md).
-
 ## Run locally
 
 Requires Node ≥ 18.18 and pnpm.
@@ -80,8 +76,7 @@ key secret. The **TEE protects your words from the model provider**, but the
 gateway is technically in the plaintext path *for the inference call* (it stores
 no entries and logs no content). Stored data becomes end-to-end-encrypted in Wave
 2; the gateway leaves the plaintext path in Wave 3 via wallet-signed Direct-SDK
-inference, which also unlocks per-request cryptographic verification. See
-[`docs/privacy-model.md`](docs/privacy-model.md).
+inference, which also unlocks per-request cryptographic verification.
 
 ## Repo layout
 
@@ -90,7 +85,6 @@ apps/web            Next.js PWA — UI, gateway route, lib/0g, lib/crypto, lib/m
 packages/shared     verified 0G network params, model catalog, shared types
 services/gateway    stub (Wave 1 gateway lives in apps/web/app/api/reflect)
 contracts           stub (ERC-7857 INFT + memory anchor — Wave 3)
-docs                architecture, 0g-integration, privacy-model, wave submissions
 ```
 
 ## Roadmap
