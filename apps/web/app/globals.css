@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (toggled on <html>), not media-query-based. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Design tokens: a quiet, premium-notebook palette ──────────────────────
+   Light = warm cream paper. Dark = true, warm near-black. Single amber accent. */
+:root {
+  --canvas: #f7f3ea;
+  --surface: #fffdf8;
+  --surface-2: #f2ece0;
+  --ink: #2b2622;
+  --muted: #6f655c;
+  --accent: #b45309;        /* amber-700 */
+  --accent-strong: #92400e; /* amber-800 */
+  --accent-soft: rgba(180, 83, 9, 0.10);
+  --border: #e7ddcf;
+  --caution: #a16207;       /* amber-ish caution for DEMO state */
+}
+
+.dark {
+  --canvas: #100f0c;
+  --surface: #1a1712;
+  --surface-2: #221d16;
+  --ink: #ece5d8;
+  --muted: #9a8f80;
+  --accent: #f59e0b;        /* amber-500 — brighter for dark bg */
+  --accent-strong: #fbbf24; /* amber-400 */
+  --accent-soft: rgba(245, 158, 11, 0.12);
+  --border: #2a251d;
+  --caution: #d4a017;
+}
+
+/* Expose tokens to Tailwind utilities (bg-canvas, text-ink, font-serif, …).
+   `inline` keeps them as var() refs, so .dark overrides flow through. */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-border: var(--border);
+  --color-caution: var(--caution);
+
+  --font-serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Book Antiqua",
+    Georgia, "Times New Roman", serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+}
+
+html,
+body {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* The writing surface should feel like paper + ink. */
+.writing {
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  line-height: 1.85;
+  letter-spacing: 0.003em;
+}
+
+/* Gentle entrance for streamed reflections. */
+@keyframes lumen-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise {
+  animation: lumen-rise 0.5s ease-out both;
+}
+
+/* Soft blinking caret while streaming. */
+@keyframes lumen-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5ch;
+  height: 1.1em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: lumen-blink 1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise { animation: none; }
+  .caret::after { animation: none; }
+}
