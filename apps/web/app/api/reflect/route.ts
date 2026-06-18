@@ -3,7 +3,7 @@
  * Compute API key and proxies inference to the Router in private trust mode,
  * streaming tokens back as Server-Sent Events with a final attestation event.
  *
- * Honest threat model (docs/privacy-model.md): this gateway is technically in the
+ * Honest threat model: this gateway is technically in the
  * plaintext path for the inference CALL in Waves 1–2. It holds no long-term
  * plaintext and logs no entry/reflection content. Wave 3 moves to the wallet-
  * signed Direct SDK so the gateway leaves the plaintext path entirely.
