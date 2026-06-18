@@ -39,7 +39,7 @@ chainId, and the W2–W4 forward plan).
 tests pass; the demo-mode SSE loop is confirmed end-to-end (token stream → final
 attestation event).
 
-**Live demo:** https://lumen-snowy-two.vercel.app (real 0G TEE inference) · **Repo:** _<GitHub URL>_ · **Demo video:** _<link>_
+**Live demo:** https://lumen-snowy-two.vercel.app (real 0G TEE inference) · **Repo:** https://github.com/OoJae/lumen · **Demo video:** _<link>_
 
 ## 4. Demo video script (≤3 min)
 
@@ -53,16 +53,15 @@ attestation event).
 
 > 🔒 Introducing **Lumen** — a private, user-owned AI journaling companion built on @0G_labs.
 >
-> Every reflection runs inside 0G's TEE Sealed Inference, so no one — not even us — can read your thoughts. And you can prove it.
+> You'd never paste your journal into ChatGPT. With Lumen you can — every reflection runs inside 0G's TEE Sealed Inference, so no one (not even us) can read your thoughts. And you can verify it.
 >
-> Your memory: encrypted. Your companion: yours to own (ERC-7857).
->
-> Wave 1 is live 👇 [demo link / clip]
+> Live now, real on-chain TEE inference 👇
+> https://lumen-snowy-two.vercel.app
 >
 > #0GBridge #BuildOn0G
-> @0G_Builders @AKINDO_io
+> @0G_labs @0G_Builders @AKINDO_io
 
-Attach a ≤30s screen clip of the 🔒 reflection + attestation viewer.
+Attach a ≤30s screen clip: write an entry → reflection streams → tap 🔒 → attestation viewer (model GLM-5.1, TeeML, proof reference).
 
 ## 6. Submission checklist
 
