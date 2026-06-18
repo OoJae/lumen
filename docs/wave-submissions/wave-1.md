@@ -39,7 +39,7 @@ chainId, and the W2–W4 forward plan).
 tests pass; the demo-mode SSE loop is confirmed end-to-end (token stream → final
 attestation event).
 
-**Live demo:** _<Vercel URL>_ · **Repo:** _<GitHub URL>_ · **Demo video:** _<link>_
+**Live demo:** https://lumen-snowy-two.vercel.app (real 0G TEE inference) · **Repo:** _<GitHub URL>_ · **Demo video:** _<link>_
 
 ## 4. Demo video script (≤3 min)
 

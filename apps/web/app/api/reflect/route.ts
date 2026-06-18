@@ -16,6 +16,7 @@ import type { ChatMessage } from '@lumen/shared';
 
 export const runtime = 'nodejs'; // async generators + openai SDK need the Node runtime
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // headroom for slower TEE generations / the live-timeout fallback
 
 const encoder = new TextEncoder();
 

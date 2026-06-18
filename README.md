@@ -37,7 +37,7 @@ attestation viewer → session memory → wallet "save & own" stub.**
 
 Not in Wave 1 (by design): Storage persistence, INFT minting, payments — those are Waves 2–4.
 
-**Live demo:** _<add Vercel URL>_ · **Demo video:** _<add link>_
+**Live demo:** https://lumen-snowy-two.vercel.app (real 0G TEE inference — GLM-5.1, TeeML) · **Demo video:** _<add link>_
 
 ## Architecture (summary)
 

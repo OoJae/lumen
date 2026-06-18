@@ -43,6 +43,40 @@ encrypted vectors. Exact id strings should be reconfirmed against the live
 `GET /v1/models` once a key is provisioned; the active model is env-configurable
 (`ZG_COMPUTE_MODEL`).
 
+### What actually shipped in Wave 1 (Direct path — verified live)
+
+The deployed credential turned out to be a wallet-signed **`app-sk-` Direct-SDK
+token** (from `0g-compute-cli inference get-secret`), **not** a hosted-Router
+`sk-` key — the Router (`router-api.0g.ai`) rejects `app-sk-` for chat (401),
+while `GET /v1/models` is public. So Wave 1 ships the **Direct provider path**,
+which is actually a *stronger* privacy story:
+
+- The token is sent as `Authorization: Bearer app-sk-…` to the **provider's own
+  endpoint**, `POST ${providerUrl}/v1/proxy/chat/completions` (OpenAI-compatible).
+  No wallet private key is needed at request time — the signature is baked into
+  the token.
+- The provider URL is discovered **read-only** (no wallet/funds) via
+  `@0gfoundation/0g-compute-ts-sdk` (`createReadOnlyInferenceBroker(rpc).listService()`,
+  filtered by the provider address embedded in the token). We discover once and
+  bake `ZG_PROVIDER_URL` into env, so **no SDK/on-chain call happens at runtime**.
+- **Verified live on 0G mainnet:** provider `0xDB7B4653…` →
+  `https://compute-network-23.integratenetwork.work`, model **`glm-5.1`**,
+  verifiability **TeeML** (the model runs *inside* the enclave and signs
+  responses), `teeSignerAcknowledged: true`. A real reflection returned in ~8s
+  with proof reference `chatId` (e.g. `a1125cbc-…`).
+- **Gateway env:** `ZG_COMPUTE_API_KEY` (the `app-sk-` token), `ZG_PROVIDER_URL`,
+  `ZG_COMPUTE_MODEL=glm-5.1`. If `ZG_PROVIDER_URL` is unset, the same code path
+  targets the hosted Router instead (drop-in `sk-` support). If a live call
+  times out, the gateway streams a clearly-labeled demo so the UI never hangs.
+- **Caveat:** the `app-sk-` token is cryptographically **locked to one provider**
+  (no failover) and that provider can be unreachable from some networks. A hosted
+  Router `sk-` key (auto-failover across providers) remains the more robust option
+  and is a one-line env change (`ZG_PROVIDER_URL` unset + `sk-` key).
+- **Package note:** `@0glabs/0g-serving-broker` is **deprecated/renamed** →
+  **`@0gfoundation/0g-compute-ts-sdk`** (used here for read-only discovery only).
+  Per-request crypto verification (`processResponse(provider, chatID)`) stays a
+  Wave-3 enhancement.
+
 ## Network parameters (verified)
 
 | Item | Mainnet "Aristotle" | Testnet "Galileo" |
