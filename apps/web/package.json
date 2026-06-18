@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@0gfoundation/0g-compute-ts-sdk": "^0.8.4",
     "@lumen/shared": "workspace:*",
     "@rainbow-me/rainbowkit": "^2.2.0",
     "@tanstack/react-query": "^5.101.0",

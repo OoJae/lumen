@@ -7,6 +7,7 @@ packages:
 # pnpm 11 build-script approvals. esbuild powers Vitest; sharp speeds Next image
 # optimization; keccak is a wallet-stack hashing dep. The ws perf addons are optional.
 allowBuilds:
+  blake-hash: true
   bufferutil: false
   esbuild: true
   keccak: true

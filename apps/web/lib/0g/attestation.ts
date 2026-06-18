@@ -16,9 +16,15 @@ export const ATTESTATION_NOTE_LIVE =
   'arrives with the Direct SDK in Wave 3.';
 
 export const ATTESTATION_NOTE_DEMO =
-  'DEMO mode — no 0G Compute key is configured, so this reflection was generated locally ' +
-  'as a mock. It did NOT run inside a TEE. Set ZG_COMPUTE_API_KEY (from pc.0g.ai) for real ' +
+  'DEMO mode — no 0G Compute credential is configured, so this reflection was generated ' +
+  'locally as a mock. It did NOT run inside a TEE. Configure a 0G Compute token for real ' +
   'Sealed Inference.';
+
+export const ATTESTATION_NOTE_LIVE_UNAVAILABLE =
+  'The live 0G Compute provider (TEE) was unreachable just now, so this is a local demo ' +
+  'reflection — NOT a real TEE response. 0G is a decentralized provider marketplace; ' +
+  'individual providers can be temporarily offline. Real Sealed Inference resumes ' +
+  'automatically once the provider responds.';
 
 export function buildLiveAttestation(model: string, chatId?: string): AttestationInfo {
   return {
@@ -34,7 +40,10 @@ export function buildLiveAttestation(model: string, chatId?: string): Attestatio
   };
 }
 
-export function buildDemoAttestation(model: string): AttestationInfo {
+export function buildDemoAttestation(
+  model: string,
+  reason: 'no-key' | 'live-unavailable' = 'no-key',
+): AttestationInfo {
   return {
     verificationStatus: 'demo',
     trustMode: 'unspecified',
@@ -43,7 +52,7 @@ export function buildDemoAttestation(model: string): AttestationInfo {
     model: `${model} (mock)`,
     timestamp: new Date().toISOString(),
     learnMoreUrl: ATTESTATION_DOCS_URL,
-    note: ATTESTATION_NOTE_DEMO,
+    note: reason === 'live-unavailable' ? ATTESTATION_NOTE_LIVE_UNAVAILABLE : ATTESTATION_NOTE_DEMO,
   };
 }
 

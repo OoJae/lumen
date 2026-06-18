@@ -9,7 +9,7 @@
  * signed Direct SDK so the gateway leaves the plaintext path entirely.
  */
 import type { NextRequest } from 'next/server';
-import { reflectStream, reflectDemo } from '@/lib/0g/compute';
+import { reflectStream, reflectDemo, type ReflectResult } from '@/lib/0g/compute';
 import { isComputeLive } from '@/lib/0g/env';
 import { LUMEN_SYSTEM_PROMPT } from '@/lib/prompts';
 import type { ChatMessage } from '@lumen/shared';
@@ -44,18 +44,29 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      try {
-        const { tokens, attestation } = live
-          ? await reflectStream(withSystem)
-          : reflectDemo(messages);
+      // Resolve a result. If a live provider is configured but unreachable
+      // (e.g. provider outage), fall back to a clearly-labeled demo instead of
+      // hanging or 500-ing the UI.
+      let result: ReflectResult;
+      if (live) {
+        try {
+          result = await reflectStream(withSystem);
+        } catch {
+          result = reflectDemo(messages, { reason: 'live-unavailable' });
+        }
+      } else {
+        result = reflectDemo(messages, { reason: 'no-key' });
+      }
 
-        for await (const token of tokens) {
+      try {
+        for await (const token of result.tokens) {
           controller.enqueue(sse(null, { token }));
         }
-        controller.enqueue(sse('attestation', attestation));
+        controller.enqueue(sse('attestation', result.finalize()));
         controller.enqueue(sse('done', { ok: true }));
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Inference failed';
+        // Mid-stream failure (e.g. provider dropped after headers).
+        const message = err instanceof Error ? err.message : 'Inference interrupted';
         controller.enqueue(sse('error', { message }));
       } finally {
         controller.close();

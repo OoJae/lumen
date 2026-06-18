@@ -28,7 +28,9 @@ export const ZG_MODELS: ZgModel[] = [
   { id: 'whisper-large-v3', label: 'Whisper Large v3', family: 'OpenAI', modality: 'speech', verifiability: 'TeeML' },
 ];
 
-export const DEFAULT_MODEL_ID = 'glm-5';
+// glm-5.1 is TeeML on 0G mainnet (model runs directly inside the enclave and
+// signs responses) — the strongest verifiability tier, so it's our default.
+export const DEFAULT_MODEL_ID = 'glm-5.1';
 
 /** Hardware basis of 0G Sealed Inference — shown in the attestation viewer. */
 export const TEE_HARDWARE = {
