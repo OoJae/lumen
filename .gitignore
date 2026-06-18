@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# production
+build/
+dist/
+
+# env / secrets — NEVER commit real keys
+.env
+.env.local
+.env*.local
+*.pem
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+.vercel
+coverage/
+.turbo/
+
+# editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# local planning docs (kept out of the public repo)
+/0G-WaveHack-Research-Report.md
+/Lumen-Build-Guide.md
+/Lumen-Claude-Code-Master-Prompt.md
+/Lumen-Wave1-Submission.md

@@ -1,0 +1,14 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# services/gateway and contracts are documented stubs in Wave 1 (no package.json yet);
+# they join the workspace when activated in Waves 2–3.
+
+# pnpm 11 build-script approvals. esbuild powers Vitest; sharp speeds Next image
+# optimization; keccak is a wallet-stack hashing dep. The ws perf addons are optional.
+allowBuilds:
+  bufferutil: false
+  esbuild: true
+  keccak: true
+  sharp: true
+  utf-8-validate: false

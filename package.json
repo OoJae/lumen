@@ -1,0 +1,21 @@
+{
+  "name": "lumen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lumen — a private, user-owned AI journaling companion built on 0G. Own your mind. Prove your privacy.",
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "dev": "pnpm --filter @lumen/web dev",
+    "build": "pnpm --filter @lumen/web build",
+    "start": "pnpm --filter @lumen/web start",
+    "lint": "pnpm --filter @lumen/web lint",
+    "test": "pnpm --filter @lumen/web test",
+    "typecheck": "pnpm --filter @lumen/web typecheck"
+  },
+  "devDependencies": {
+    "typescript": "5.7.2"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
