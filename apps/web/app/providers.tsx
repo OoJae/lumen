@@ -6,6 +6,7 @@ import { RainbowKitProvider, getDefaultConfig, lightTheme } from '@rainbow-me/ra
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { zgTestnet, zgMainnet } from '@/lib/0g/chain';
+import { MemoryKeyProvider } from '@/lib/hooks/useMemoryKey';
 
 // Wave 1 wallet is a non-transacting "save & own" stub. WalletConnect projectId
 // is optional for injected wallets; a placeholder keeps the connector happy.
@@ -31,7 +32,7 @@ export function Providers({ children }: { children: ReactNode }) {
             fontStack: 'system',
           })}
         >
-          {children}
+          <MemoryKeyProvider>{children}</MemoryKeyProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
