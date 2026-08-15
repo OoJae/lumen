@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ZG_TESTNET } from '@lumen/shared';
 
+import { activeNetwork } from '@/lib/0g/network';
 import type { JournalMemory, ProofResult } from '@/lib/hooks/useJournalMemory';
 import { CloseIcon, CloudCheckIcon } from './icons';
 
@@ -129,7 +129,7 @@ export function StorageReceiptViewer({
           </button>
           {receipt.txHash && (
             <a
-              href={`${ZG_TESTNET.explorerUrl}/tx/${receipt.txHash}`}
+              href={`${activeNetwork().explorerUrl}/tx/${receipt.txHash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-full border border-border px-3.5 py-1.5 text-xs font-medium text-muted hover:border-accent/40 hover:text-ink"

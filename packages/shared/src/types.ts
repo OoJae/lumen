@@ -100,8 +100,12 @@ export interface StorageReceipt {
   seq: number;
   rootHash: string;
   txHash: string;
-  /** Padded (bucketed) ciphertext size actually uploaded, in bytes. */
+  /** The power-of-two padded PLAINTEXT bucket size — the value the privacy
+   *  docs' "bucketed size" claim refers to (not the uploaded envelope length). */
   paddedBytes: number;
+  /** How many turns the saved snapshot contained — the clock-skew-proof basis
+   *  for "are there unsaved entries?". */
+  turnCount: number;
   savedAt: string; // ISO-8601
 }
 

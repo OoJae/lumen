@@ -38,9 +38,21 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const live = isComputeLive();
+  // The client may prepend its own system block (the W2 recall context). Fold
+  // any leading system messages into ONE — some providers reject duplicate or
+  // non-leading system roles, and that failure would silently demote every
+  // recall-bearing reflection to the demo fallback.
+  let leadingSystems = 0;
+  while (leadingSystems < messages.length && messages[leadingSystems]!.role === 'system') {
+    leadingSystems++;
+  }
+  const systemContent = [
+    LUMEN_SYSTEM_PROMPT,
+    ...messages.slice(0, leadingSystems).map((m) => m.content),
+  ].join('\n\n');
   const withSystem: ChatMessage[] = [
-    { role: 'system', content: LUMEN_SYSTEM_PROMPT },
-    ...messages,
+    { role: 'system', content: systemContent },
+    ...messages.slice(leadingSystems),
   ];
 
   const stream = new ReadableStream<Uint8Array>({

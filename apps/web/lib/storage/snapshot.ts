@@ -69,20 +69,33 @@ export function buildSnapshot(params: BuildSnapshotParams): MemorySnapshotV1 {
   };
 }
 
+export interface EncryptedSnapshot {
+  /** The exact bytes destined for the 0G Log layer (UTF-8 envelope JSON). */
+  bytes: Uint8Array;
+  /** The power-of-two padded plaintext bucket size — what "bucketed size"
+   *  means in the privacy docs and the storage receipt. */
+  paddedBytes: number;
+}
+
+/** Compute the padded plaintext bucket size of a snapshot without encrypting. */
+export function snapshotBucketBytes(snapshot: MemorySnapshotV1): number {
+  return padToBucket(encoder.encode(canonicalJson(snapshot))).length;
+}
+
 /** Encrypt a snapshot into the exact bytes destined for the 0G Log layer. */
 export async function encryptSnapshot(
   key: CryptoKey,
   snapshot: MemorySnapshotV1,
-): Promise<Uint8Array> {
-  const plaintext = encoder.encode(canonicalJson(snapshot));
+): Promise<EncryptedSnapshot> {
+  const padded = padToBucket(encoder.encode(canonicalJson(snapshot)));
   const envelope = await encryptBytes(
     key,
-    padToBucket(plaintext),
+    padded,
     'snapshot',
     `${snapshot.wallet}:${snapshot.seq}`,
     snapshot.keyVersion,
   );
-  return encoder.encode(JSON.stringify(envelope));
+  return { bytes: encoder.encode(JSON.stringify(envelope)), paddedBytes: padded.length };
 }
 
 export interface ExpectedSnapshot {
@@ -106,11 +119,12 @@ export async function decryptSnapshot(
   } catch {
     throw new Error('Not a Lumen snapshot: unreadable envelope');
   }
-  if (envelope?.v !== 2 || envelope.typ !== 'snapshot') {
+  if (envelope?.v !== 2 || typeof envelope.aad !== 'string') {
     throw new Error('Not a Lumen snapshot envelope');
   }
 
   const aad = parseAad(envelope.aad);
+  if (aad.typ !== 'snapshot') throw new Error('Not a Lumen snapshot envelope');
   const [aadWallet, aadSeqRaw] = splitLastColon(aad.id);
   if (aadWallet !== wallet) {
     throw new Error('This snapshot belongs to a different wallet');

@@ -121,9 +121,22 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
       </button>
       {save.state === 'error' && save.error && (
         <span className="w-full text-xs text-caution">
-          {save.error.includes('insufficient funds')
-            ? 'Your wallet needs a little testnet 0G to pay the storage fee — grab some at faucet.0g.ai.'
-            : save.error}
+          {save.error.kind === 'insufficient-funds' ? (
+            <>
+              Your wallet needs a little testnet 0G to pay the storage fee — grab some at{' '}
+              <a
+                href="https://faucet.0g.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                faucet.0g.ai
+              </a>
+              .
+            </>
+          ) : (
+            save.error.message
+          )}
         </span>
       )}
       {modal}

@@ -31,6 +31,7 @@ import {
   decryptSnapshot,
   encryptSnapshot,
   packVector,
+  snapshotBucketBytes,
   unpackVector,
 } from '@/lib/storage/snapshot';
 import { useMemoryKey, type MemoryKeyState } from './useMemoryKey';
@@ -45,6 +46,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export type SaveState = 'idle' | 'saving' | 'error';
+
+/** Structured save failure so the UI never has to sniff provider strings. */
+export interface SaveError {
+  message: string;
+  kind: 'insufficient-funds' | 'other';
+}
 
 export interface ProofResult {
   turnCount: number;
@@ -64,7 +71,7 @@ export interface JournalMemory {
   exportRecoveryKey(): Promise<string>;
   save: {
     state: SaveState;
-    error: string | null;
+    error: SaveError | null;
     receipt: StorageReceipt | null;
     dirty: boolean;
     toZg(): Promise<StorageReceipt>;
@@ -98,7 +105,7 @@ export function useJournalMemory(): JournalMemory {
   const [lockedCount, setLockedCount] = useState(0);
   const [receipt, setReceipt] = useState<StorageReceipt | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<SaveError | null>(null);
 
   const turnsRef = useRef<RecallableTurn[]>(turns);
   turnsRef.current = turns;
@@ -114,8 +121,12 @@ export function useJournalMemory(): JournalMemory {
   useEffect(() => {
     const prev = prevWalletRef.current;
     if (prev !== null && prev !== wallet) {
+      // Different wallet (or disconnect): drop decrypted content AND the
+      // previous wallet's save status — its errors must not leak into this one.
       setTurns([]);
       setReceipt(null);
+      setSaveState('idle');
+      setSaveError(null);
     }
     prevWalletRef.current = wallet;
     walletRef.current = wallet;
@@ -125,6 +136,20 @@ export function useJournalMemory(): JournalMemory {
       setLockedCount(0);
     }
   }, [wallet]);
+
+  const persistVector = useCallback(
+    async (key: CryptoKey, forWallet: string, turnId: string, vector: number[]) => {
+      const envelope = await encryptBytes(
+        key,
+        vectorToBytes(Float32Array.from(vector)),
+        'vector',
+        `${forWallet}:${turnId}`,
+        keyVersion,
+      );
+      await db.putVector(forWallet, turnId, envelope);
+    },
+    [keyVersion],
+  );
 
   const persistTurn = useCallback(
     async (key: CryptoKey, forWallet: string, turn: RecallableTurn) => {
@@ -136,18 +161,33 @@ export function useJournalMemory(): JournalMemory {
         keyVersion,
       );
       await db.putTurn(forWallet, { id: turn.id, createdAt: turn.createdAt }, envelope);
-      if (turn.embedding) {
-        const vecEnvelope = await encryptBytes(
-          key,
-          vectorToBytes(Float32Array.from(turn.embedding)),
-          'vector',
-          `${forWallet}:${turn.id}`,
-          keyVersion,
-        );
-        await db.putVector(forWallet, turn.id, vecEnvelope);
-      }
+      if (turn.embedding) await persistVector(key, forWallet, turn.id, turn.embedding);
     },
-    [keyVersion],
+    [keyVersion, persistVector],
+  );
+
+  /** Best-effort async embed for a turn that lacks a vector. The wallet is
+   *  captured NOW: if the user switches wallets before the model finishes,
+   *  nothing is persisted under the new wallet (no cross-wallet writes). */
+  const embedAndPersist = useCallback(
+    (turn: RecallableTurn) => {
+      const ownerWallet = walletRef.current;
+      void embed(turn.entry)
+        .then(async (vector) => {
+          if (walletRef.current !== ownerWallet) return;
+          setTurns((prev) =>
+            prev.map((t) => (t.id === turn.id ? { ...t, embedding: vector } : t)),
+          );
+          const key = getKey();
+          if (key && ownerWallet) {
+            await persistVector(key, ownerWallet, turn.id, vector);
+          }
+        })
+        .catch(() => {
+          // Model unavailable — recall degrades to session context.
+        });
+    },
+    [getKey, persistVector],
   );
 
   const hydrate = useCallback(async () => {
@@ -161,46 +201,56 @@ export function useJournalMemory(): JournalMemory {
     ]);
 
     const vectorMap = new Map<string, number[]>();
-    for (const { turnId, envelope } of storedVectors) {
-      try {
-        const bytes = await decryptBytes(key, envelope, {
-          typ: 'vector',
-          keyVersion,
-          aadId: `${forWallet}:${turnId}`,
-        });
-        vectorMap.set(turnId, Array.from(bytesToVector(bytes)));
-      } catch {
-        // Corrupt/foreign vector — recall just won't cover this turn.
-      }
-    }
+    await Promise.all(
+      storedVectors.map(async ({ turnId, envelope }) => {
+        try {
+          const bytes = await decryptBytes(key, envelope, {
+            typ: 'vector',
+            keyVersion,
+            aadId: `${forWallet}:${turnId}`,
+          });
+          vectorMap.set(turnId, Array.from(bytesToVector(bytes)));
+        } catch {
+          // Corrupt/foreign vector — recall just won't cover this turn.
+        }
+      }),
+    );
 
-    const hydrated: RecallableTurn[] = [];
-    for (const record of storedTurns) {
-      try {
-        const bytes = await decryptBytes(key, record.envelope, {
-          typ: 'turn',
-          keyVersion,
-          aadId: `${forWallet}:${record.meta.id}`,
-        });
-        const persisted = JSON.parse(decoder.decode(bytes)) as PersistedTurnV1;
-        hydrated.push({ ...persisted, embedding: vectorMap.get(persisted.id) });
-      } catch {
-        // Skip anything that fails its binding checks rather than show garbage.
-      }
-    }
+    const hydrated = (
+      await Promise.all(
+        storedTurns.map(async (record): Promise<RecallableTurn | null> => {
+          try {
+            const bytes = await decryptBytes(key, record.envelope, {
+              typ: 'turn',
+              keyVersion,
+              aadId: `${forWallet}:${record.meta.id}`,
+            });
+            const persisted = JSON.parse(decoder.decode(bytes)) as PersistedTurnV1;
+            return { ...persisted, embedding: vectorMap.get(persisted.id) };
+          } catch {
+            // Skip anything that fails its binding checks rather than show garbage.
+            return null;
+          }
+        }),
+      )
+    ).filter((t): t is RecallableTurn => t !== null);
 
     // Backfill: session turns written before the wallet existed.
     const known = new Set(hydrated.map((t) => t.id));
     const backfill = turnsRef.current.filter((t) => !known.has(t.id));
-    for (const turn of backfill) {
-      await persistTurn(key, forWallet, turn).catch(() => {});
-    }
+    await Promise.all(backfill.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})));
 
-    setTurns([...hydrated, ...backfill].sort(byCreatedAt));
+    const merged = [...hydrated, ...backfill].sort(byCreatedAt);
+    setTurns(merged);
     setReceipt(await db.getPointer(forWallet));
     setLockedCount(0);
     preloadEmbedder();
-  }, [getKey, keyVersion, persistTurn]);
+    // Re-embed anything that never got a vector (model was offline, tab closed
+    // mid-embed, restored from another device) so recall covers it eventually.
+    for (const turn of merged) {
+      if (!turn.embedding) embedAndPersist(turn);
+    }
+  }, [getKey, keyVersion, persistTurn, embedAndPersist]);
 
   const unlock = useCallback(async () => {
     await memoryKey.unlock();
@@ -227,29 +277,9 @@ export function useJournalMemory(): JournalMemory {
       }
 
       // Embed asynchronously — never awaited by the reflect loop.
-      void embed(turn.entry)
-        .then(async (vector) => {
-          setTurns((prev) =>
-            prev.map((t) => (t.id === turn.id ? { ...t, embedding: vector } : t)),
-          );
-          const k = getKey();
-          const w = walletRef.current;
-          if (k && w) {
-            const vecEnvelope = await encryptBytes(
-              k,
-              vectorToBytes(Float32Array.from(vector)),
-              'vector',
-              `${w}:${turn.id}`,
-              keyVersion,
-            );
-            await db.putVector(w, turn.id, vecEnvelope);
-          }
-        })
-        .catch(() => {
-          // Model unavailable — recall degrades to session context.
-        });
+      embedAndPersist(recallable);
     },
-    [getKey, keyVersion, persistTurn],
+    [getKey, persistTurn, embedAndPersist],
   );
 
   const toZg = useCallback(async (): Promise<StorageReceipt> => {
@@ -273,7 +303,7 @@ export function useJournalMemory(): JournalMemory {
           .filter((t): t is RecallableTurn & { embedding: number[] } => Boolean(t.embedding))
           .map((t) => packVector(t.id, t.embedding)),
       });
-      const bytes = await encryptSnapshot(key, snapshot);
+      const { bytes, paddedBytes } = await encryptSnapshot(key, snapshot);
       const { getStorageSigner, uploadBlob } = await zg();
       const signer = await getStorageSigner(connector);
       const result = await uploadBlob(signer, bytes);
@@ -281,7 +311,8 @@ export function useJournalMemory(): JournalMemory {
         seq: snapshot.seq,
         rootHash: result.rootHash,
         txHash: result.txHash,
-        paddedBytes: bytes.length,
+        paddedBytes,
+        turnCount: snapshot.turns.length,
         savedAt: snapshot.createdAt,
       };
       await db.setPointer(forWallet, nextReceipt);
@@ -289,8 +320,12 @@ export function useJournalMemory(): JournalMemory {
       setSaveState('idle');
       return nextReceipt;
     } catch (err) {
+      const { InsufficientFundsError } = await zg();
       setSaveState('error');
-      setSaveError(err instanceof Error ? err.message : 'Save failed');
+      setSaveError({
+        message: err instanceof Error ? err.message : 'Save failed',
+        kind: err instanceof InsufficientFundsError ? 'insufficient-funds' : 'other',
+      });
       throw err;
     }
   }, [connector, getKey, keyVersion]);
@@ -312,27 +347,39 @@ export function useJournalMemory(): JournalMemory {
         embedding: vectorMap.get(t.id),
       }));
 
-      for (const turn of restored) {
-        await persistTurn(key, forWallet, turn).catch(() => {});
+      await Promise.all(restored.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})));
+
+      const have = new Set(turnsRef.current.map((t) => t.id));
+      const merged = [...turnsRef.current, ...restored.filter((t) => !have.has(t.id))].sort(
+        byCreatedAt,
+      );
+      setTurns(merged);
+
+      // Never REGRESS the pointer: restoring an old receipt must not fork the
+      // seq/prevRootHash chain by making the next save re-use an old seq.
+      const current = receiptRef.current;
+      if (!current || snapshot.seq >= current.seq) {
+        const pointer: StorageReceipt = {
+          seq: snapshot.seq,
+          rootHash: rootHash.trim(),
+          txHash: '',
+          paddedBytes: snapshotBucketBytes(snapshot),
+          // What the snapshot AT THIS ROOT contains — if the local merge holds
+          // more turns than that, `dirty` correctly prompts a fresh save.
+          turnCount: snapshot.turns.length,
+          savedAt: snapshot.createdAt,
+        };
+        await db.setPointer(forWallet, pointer);
+        setReceipt(pointer);
       }
 
-      setTurns((prev) => {
-        const have = new Set(prev.map((t) => t.id));
-        return [...prev, ...restored.filter((t) => !have.has(t.id))].sort(byCreatedAt);
-      });
-
-      const pointer: StorageReceipt = {
-        seq: snapshot.seq,
-        rootHash: rootHash.trim(),
-        txHash: '',
-        paddedBytes: bytes.length,
-        savedAt: snapshot.createdAt,
-      };
-      await db.setPointer(forWallet, pointer);
-      setReceipt(pointer);
+      // Turns restored without vectors get re-embedded here, best-effort.
+      for (const turn of restored) {
+        if (!turn.embedding) embedAndPersist(turn);
+      }
       return restored.length;
     },
-    [getKey, keyVersion, persistTurn],
+    [getKey, keyVersion, persistTurn, embedAndPersist],
   );
 
   const verifyOnZg = useCallback(async () => {
@@ -362,22 +409,46 @@ export function useJournalMemory(): JournalMemory {
     if (keyState !== 'unlocked') return false;
     if (turns.length === 0) return false;
     if (!receipt) return true;
-    return turns.some((t) => t.createdAt > receipt.savedAt);
+    // Count-based, not timestamp-based: wall clocks differ across devices, and
+    // a skewed clock must never hide the Save button.
+    return turns.length !== receipt.turnCount;
   }, [keyState, turns, receipt]);
 
-  return {
-    keyState,
-    wallet,
-    turns,
-    lockedCount,
-    addTurn,
-    unlock,
-    unlockWithRecoveryKey,
-    lock: memoryKey.lock,
-    exportRecoveryKey: memoryKey.exportRecoveryKey,
-    save: { state: saveState, error: saveError, receipt, dirty, toZg },
-    restoreFromRoot,
-    verifyOnZg,
-    proveOwnership,
-  };
+  const save = useMemo(
+    () => ({ state: saveState, error: saveError, receipt, dirty, toZg }),
+    [saveState, saveError, receipt, dirty, toZg],
+  );
+
+  return useMemo(
+    () => ({
+      keyState,
+      wallet,
+      turns,
+      lockedCount,
+      addTurn,
+      unlock,
+      unlockWithRecoveryKey,
+      lock: memoryKey.lock,
+      exportRecoveryKey: memoryKey.exportRecoveryKey,
+      save,
+      restoreFromRoot,
+      verifyOnZg,
+      proveOwnership,
+    }),
+    [
+      keyState,
+      wallet,
+      turns,
+      lockedCount,
+      addTurn,
+      unlock,
+      unlockWithRecoveryKey,
+      memoryKey.lock,
+      memoryKey.exportRecoveryKey,
+      save,
+      restoreFromRoot,
+      verifyOnZg,
+      proveOwnership,
+    ],
+  );
 }

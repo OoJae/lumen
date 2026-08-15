@@ -17,6 +17,11 @@ export interface RecallableTurn extends JournalTurn {
 
 export const RECALL_MIN_SCORE = 0.35;
 
+/** Hard budget for the query embed on the SUBMIT path. A cold model (first
+ *  download) simply misses this window and recall skips — the reflection must
+ *  start immediately; the model keeps warming for next time. */
+export const RECALL_EMBED_BUDGET_MS = 2_500;
+
 export async function recallRelevant(
   query: string,
   turns: RecallableTurn[],
@@ -27,7 +32,14 @@ export async function recallRelevant(
     // reaches further back than the session window.
     const candidates = turns.slice(0, Math.max(0, turns.length - MAX_CONTEXT_TURNS));
     if (candidates.length === 0) return [];
-    const queryVector = await embed(query);
+    // No candidate has a vector yet → embedding the query is pure waste.
+    if (!candidates.some((turn) => turn.embedding)) return [];
+    const queryVector = await Promise.race([
+      embed(query),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('recall embed budget exceeded')), RECALL_EMBED_BUDGET_MS),
+      ),
+    ]);
     return rankBySimilarity(
       queryVector,
       candidates,

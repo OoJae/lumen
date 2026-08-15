@@ -16,15 +16,31 @@
 
 import { Indexer, MemData } from '@0gfoundation/0g-storage-ts-sdk/browser';
 import { BrowserProvider, type Eip1193Provider, type Signer } from 'ethers';
-import { ZG_TESTNET } from '@lumen/shared';
 import type { Connector } from 'wagmi';
+import { activeNetwork } from '@/lib/0g/network';
 
 function indexerRpc(): string {
-  return process.env.NEXT_PUBLIC_ZG_INDEXER_RPC || ZG_TESTNET.storage.indexerRpc;
+  return activeNetwork().storage.indexerRpc;
 }
 
 function evmRpc(): string {
-  return process.env.NEXT_PUBLIC_ZG_RPC || ZG_TESTNET.rpcUrl;
+  return activeNetwork().rpcUrl;
+}
+
+/** Thrown when the signing wallet can't cover gas + the storage fee, so the UI
+ *  can offer the faucet without sniffing provider message strings. */
+export class InsufficientFundsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InsufficientFundsError';
+  }
+}
+
+function isInsufficientFunds(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  if (code === 'INSUFFICIENT_FUNDS' || code === -32000) return true;
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return message.includes('insufficient funds') || message.includes('insufficient balance');
 }
 
 /** Bridge the active wagmi connector (EIP-1193) to the ethers signer the SDK expects. */
@@ -46,7 +62,14 @@ export async function uploadBlob(signer: Signer, bytes: Uint8Array): Promise<Upl
   const file = new MemData(bytes);
   const indexer = new Indexer(indexerRpc());
   const [result, err] = await indexer.upload(file, evmRpc(), signer);
-  if (err) throw new Error(`0G upload failed: ${err.message}`);
+  if (err) {
+    if (isInsufficientFunds(err)) {
+      throw new InsufficientFundsError(
+        'Your wallet needs a little testnet 0G to pay the storage fee.',
+      );
+    }
+    throw new Error(`0G upload failed: ${err.message}`);
+  }
   if (!result || Array.isArray((result as { rootHashes?: string[] }).rootHashes)) {
     throw new Error('0G upload returned an unexpected multi-file result');
   }

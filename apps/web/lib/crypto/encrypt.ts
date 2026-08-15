@@ -69,9 +69,10 @@ export type EnvelopeType = 'turn' | 'vector' | 'snapshot' | 'kcv';
 export interface EncryptedEnvelope {
   v: 2;
   alg: 'AES-GCM';
-  typ: EnvelopeType;
-  /** The exact AAD string authenticated at encrypt time (transparency +
-   *  restore flows read ids like the snapshot seq back out of it). */
+  /** The exact AAD string authenticated at encrypt time — the SINGLE source of
+   *  the envelope's type/keyVersion/slot (read it via parseAad). Deliberately
+   *  not duplicated into a separate `typ` field: only this string is covered by
+   *  GCM, so an unauthenticated copy could disagree with it. */
   aad: string;
   iv: string; // base64 (12 bytes)
   ciphertext: string; // base64 (includes the GCM auth tag)
@@ -116,7 +117,6 @@ export async function encryptBytes(
   return {
     v: 2,
     alg: 'AES-GCM',
-    typ,
     aad,
     iv: bytesToBase64(iv),
     ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
@@ -144,8 +144,8 @@ export async function decryptBytes(
 ): Promise<Uint8Array> {
   if (env.v !== 2 || env.alg !== 'AES-GCM') throw new Error('Unsupported envelope version');
   const parts = parseAad(env.aad);
-  if (env.typ !== expected.typ || parts.typ !== expected.typ) {
-    throw new Error(`Envelope type mismatch: expected ${expected.typ}, got ${env.typ}`);
+  if (parts.typ !== expected.typ) {
+    throw new Error(`Envelope type mismatch: expected ${expected.typ}, got ${parts.typ}`);
   }
   if (parts.keyVersion !== expected.keyVersion) {
     throw new Error(

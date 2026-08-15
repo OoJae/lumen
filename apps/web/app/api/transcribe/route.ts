@@ -1,22 +1,17 @@
 /**
  * Voice gateway (Wave 2): browser audio → 0G Whisper (TeeML) → transcript.
  *
- * Threat model (documented in docs/privacy-model.md): like text inference in
- * Waves 1–2, audio transits this gateway in plaintext for the duration of the
- * call — held in memory only, size-capped, never written to disk, never
- * logged. The whisper model itself runs TEE-attested on 0G. The transcript is
- * returned to the composer for the user to review/edit BEFORE it is ever
- * reflected on. Removing the gateway from the plaintext path is Wave 3.
+ * Thin by design — how Lumen talks to 0G lives in lib/0g/compute.ts
+ * (`transcribeAudio`), exactly like /api/reflect. Threat model (documented in
+ * docs/privacy-model.md): like text inference in Waves 1–2, audio transits
+ * this gateway in plaintext for the duration of the call — held in memory
+ * only, size-capped BEFORE the body is read, never written to disk, never
+ * logged. The transcript is returned to the composer for the user to
+ * review/edit BEFORE it is ever reflected on.
  */
 import { NextRequest } from 'next/server';
-import OpenAI from 'openai';
-import {
-  PRIVATE_MODE_HEADER,
-  PRIVATE_MODE_VALUE,
-  ROUTER_BASE_URL,
-  WHISPER_MODEL_ID,
-  type TranscribeResponse,
-} from '@lumen/shared';
+import type { TranscribeResponse } from '@lumen/shared';
+import { transcribeAudio } from '@/lib/0g/compute';
 import { isVoiceLive } from '@/lib/0g/env';
 
 export const runtime = 'nodejs';
@@ -26,8 +21,8 @@ export const maxDuration = 60;
 /** Whisper's native window is ~30s; the client stops at 25s. 2 MB comfortably
  *  covers 25s of opus/mp4 audio while bounding gateway memory. */
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
-
-const TRANSCRIBE_TIMEOUT_MS = 45_000;
+/** Multipart framing overhead allowance on top of the audio cap. */
+const MAX_BODY_BYTES = MAX_AUDIO_BYTES + 64 * 1024;
 
 export async function POST(req: NextRequest): Promise<Response> {
   if (!isVoiceLive()) {
@@ -39,6 +34,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       },
       { status: 503 },
     );
+  }
+
+  // Reject oversized requests BEFORE buffering the body — formData() would
+  // otherwise materialize an arbitrarily large upload in gateway memory.
+  const contentLength = Number(req.headers.get('content-length'));
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    return Response.json({ error: 'Content-Length required' }, { status: 411 });
+  }
+  if (contentLength > MAX_BODY_BYTES) {
+    return Response.json({ error: 'Audio too large (max 2 MB / ~25s)' }, { status: 413 });
   }
 
   let form: FormData;
@@ -56,23 +61,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     return Response.json({ error: 'Audio too large (max 2 MB / ~25s)' }, { status: 413 });
   }
 
-  const client = new OpenAI({
-    apiKey: process.env.ZG_VOICE_API_KEY,
-    baseURL: process.env.ZG_VOICE_BASE_URL || ROUTER_BASE_URL,
-    timeout: TRANSCRIBE_TIMEOUT_MS,
-    maxRetries: 0,
-  });
-
   try {
-    const result = await client.audio.transcriptions.create(
-      {
-        file,
-        model: process.env.ZG_VOICE_MODEL || WHISPER_MODEL_ID,
-        response_format: 'json',
-      },
-      { headers: { [PRIVATE_MODE_HEADER]: PRIVATE_MODE_VALUE } },
-    );
-    const text = typeof result.text === 'string' ? result.text.trim() : '';
+    const text = await transcribeAudio(file);
     return Response.json({ text } satisfies TranscribeResponse);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'transcription failed';

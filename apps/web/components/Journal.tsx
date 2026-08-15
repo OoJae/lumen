@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AttestationInfo, JournalTurn } from '@lumen/shared';
 import { AppHeader } from './AppHeader';
 import { DailyPrompt } from './DailyPrompt';
@@ -11,6 +11,7 @@ import { AttestationViewer } from './AttestationViewer';
 import { LockIcon, SparkIcon } from './icons';
 import { useJournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useStreamingReflection } from '@/lib/hooks/useStreamingReflection';
+import { preloadEmbedder } from '@/lib/memory/embeddings';
 import { recallRelevant } from '@/lib/memory/recall';
 import { buildContextWithRecall, newTurnId } from '@/lib/memory/session';
 import { promptOfTheDay } from '@/lib/prompts';
@@ -18,6 +19,7 @@ import { promptOfTheDay } from '@/lib/prompts';
 export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?: boolean }) {
   const memory = useJournalMemory();
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [viewer, setViewer] = useState<AttestationInfo | null>(null);
   const { text, attestation, status, error, reflect, reset } = useStreamingReflection();
 
@@ -30,22 +32,35 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   const streaming = status === 'streaming';
   const turns = memory.turns;
 
+  // Warm the on-device embedder once the user actually journals (anon users
+  // included), so recall never cold-starts on the submit path.
+  useEffect(() => {
+    if (turns.length > 0) preloadEmbedder();
+  }, [turns.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleSubmit(entry: string) {
+    if (submitting || streaming) return;
+    setSubmitting(true);
     setActiveEntry(entry);
-    // Recall reaches beyond the session window; failures fall back to [].
-    const recalled = await recallRelevant(entry, turns);
-    const result = await reflect(buildContextWithRecall(turns, recalled, entry));
-    if (result && result.text) {
-      const turn: JournalTurn = {
-        id: newTurnId(),
-        entry,
-        reflection: result.text,
-        attestation: result.attestation,
-        createdAt: new Date().toISOString(),
-      };
-      memory.addTurn(turn);
-      setActiveEntry(null);
-      reset();
+    try {
+      // Recall reaches beyond the session window; it is budgeted (2.5s) and
+      // failure-proof — the reflection always starts promptly.
+      const recalled = await recallRelevant(entry, turns);
+      const result = await reflect(buildContextWithRecall(turns, recalled, entry));
+      if (result && result.text) {
+        const turn: JournalTurn = {
+          id: newTurnId(),
+          entry,
+          reflection: result.text,
+          attestation: result.attestation,
+          createdAt: new Date().toISOString(),
+        };
+        memory.addTurn(turn);
+        setActiveEntry(null);
+        reset();
+      }
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -58,7 +73,11 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
       <main className="mx-auto max-w-2xl px-5 pb-28 pt-9">
         <DailyPrompt prompt={prompt} dateLabel={dateLabel} />
 
-        <JournalComposer onSubmit={handleSubmit} disabled={streaming} voiceLive={voiceLive} />
+        <JournalComposer
+          onSubmit={handleSubmit}
+          disabled={streaming || submitting}
+          voiceLive={voiceLive}
+        />
 
         <TrustLine live={live} />
 

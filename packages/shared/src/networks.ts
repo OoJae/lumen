@@ -70,11 +70,16 @@ export function resolveNetwork(opts?: {
   network?: string;
   chainId?: number;
   rpcUrl?: string;
+  indexerRpc?: string;
 }): ZgNetwork {
   const base = opts?.network === 'mainnet' ? ZG_MAINNET : ZG_TESTNET;
   return {
     ...base,
     chainId: opts?.chainId ?? base.chainId,
     rpcUrl: opts?.rpcUrl ?? base.rpcUrl,
+    storage: {
+      ...base.storage,
+      indexerRpc: opts?.indexerRpc ?? base.storage.indexerRpc,
+    },
   };
 }

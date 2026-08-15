@@ -33,6 +33,12 @@ export function getKeyDerivationMessage(version: number = CURRENT_KEY_VERSION): 
   return message;
 }
 
+export function bytesToHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
+  return hex;
+}
+
 export function hexToBytes(hex: string): Uint8Array {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
   if (clean.length % 2 !== 0) throw new Error('Invalid hex string (odd length)');

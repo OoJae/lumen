@@ -32,8 +32,9 @@ describe('envelope v2 — AAD binding', () => {
     const payload = crypto.getRandomValues(new Uint8Array(313));
     const env = await encryptBytes(key, payload, 'turn', `${WALLET}:turn_1`, 1);
     expect(env.v).toBe(2);
-    expect(env.typ).toBe('turn');
     expect(env.aad).toBe(`lumen:v2:1:turn:${WALLET}:turn_1`);
+    // The type lives ONLY inside the authenticated AAD — no unauthenticated copy.
+    expect(env).not.toHaveProperty('typ');
     const out = await decryptBytes(key, env, { typ: 'turn', keyVersion: 1, aadId: `${WALLET}:turn_1` });
     expect(Array.from(out)).toEqual(Array.from(payload));
   });
@@ -65,8 +66,8 @@ describe('envelope v2 — AAD binding', () => {
   it('fails GCM auth when the aad field is rewritten to look legitimate', async () => {
     const key = await deriveAesKey(SIG_A);
     const env = await encryptBytes(key, encoder.encode('secret'), 'snapshot', `${WALLET}:1`, 1);
-    // Attacker rewrites the transparent aad string (and matching typ) so the
-    // structural checks pass — but the ciphertext was bound to the original AAD.
+    // Attacker rewrites the transparent aad string so the structural checks
+    // pass — but the ciphertext was bound to the original AAD.
     const forged: EncryptedEnvelope = { ...env, aad: buildAad('snapshot', 1, `${WALLET}:2`) };
     await expect(
       decryptBytes(key, forged, { typ: 'snapshot', keyVersion: 1, aadId: `${WALLET}:2` }),

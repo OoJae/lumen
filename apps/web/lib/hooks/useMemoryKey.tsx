@@ -31,6 +31,7 @@ import { useAccount, useSignMessage } from 'wagmi';
 
 import { decryptBytes, encryptBytes } from '@/lib/crypto/encrypt';
 import {
+  bytesToHex,
   CURRENT_KEY_VERSION,
   deriveAesKey,
   deriveKeyMaterial,
@@ -63,29 +64,32 @@ const MemoryKeyContext = createContext<MemoryKeyContextValue | null>(null);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-async function checkOrCreateKcv(wallet: string, key: CryptoKey): Promise<boolean> {
+/** 'ok' = key matches the stored check value; 'bad' = it doesn't; 'none' = no
+ *  KCV exists yet (nothing was ever encrypted for this wallet on this device). */
+async function verifyKcv(wallet: string, key: CryptoKey): Promise<'ok' | 'bad' | 'none'> {
   const existing = await getKcv(wallet);
-  if (!existing) {
-    const envelope = await encryptBytes(
-      key,
-      encoder.encode(KCV_PLAINTEXT),
-      'kcv',
-      wallet,
-      CURRENT_KEY_VERSION,
-    );
-    await putKcv(wallet, envelope);
-    return true;
-  }
+  if (!existing) return 'none';
   try {
     const plain = await decryptBytes(key, existing, {
       typ: 'kcv',
       keyVersion: CURRENT_KEY_VERSION,
       aadId: wallet,
     });
-    return decoder.decode(plain) === KCV_PLAINTEXT;
+    return decoder.decode(plain) === KCV_PLAINTEXT ? 'ok' : 'bad';
   } catch {
-    return false;
+    return 'bad';
   }
+}
+
+async function createKcv(wallet: string, key: CryptoKey): Promise<void> {
+  const envelope = await encryptBytes(
+    key,
+    encoder.encode(KCV_PLAINTEXT),
+    'kcv',
+    wallet,
+    CURRENT_KEY_VERSION,
+  );
+  await putKcv(wallet, envelope);
 }
 
 export function MemoryKeyProvider({ children }: { children: ReactNode }) {
@@ -102,23 +106,6 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
     setState(wallet ? 'locked' : 'no-wallet');
   }, [wallet]);
 
-  const finishUnlock = useCallback(
-    async (candidate: CryptoKey, forWallet: string) => {
-      const ok = await checkOrCreateKcv(forWallet, candidate);
-      if (!ok) {
-        keyRef.current = null;
-        setState('mismatch');
-        throw new Error(
-          'This wallet signed differently than when your journal was encrypted. ' +
-            'Unlock with your recovery key instead.',
-        );
-      }
-      keyRef.current = candidate;
-      setState('unlocked');
-    },
-    [],
-  );
-
   const unlock = useCallback(async () => {
     if (!wallet) throw new Error('Connect a wallet first');
     setState('unlocking');
@@ -127,14 +114,27 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
         message: getKeyDerivationMessage(CURRENT_KEY_VERSION),
       });
       const candidate = await deriveAesKey(signature);
-      await finishUnlock(candidate, wallet);
+      const kcv = await verifyKcv(wallet, candidate);
+      if (kcv === 'bad') {
+        // Only the SIGNATURE path may diagnose non-determinism — this is the
+        // one state where "your wallet signed differently" is actually true.
+        keyRef.current = null;
+        setState('mismatch');
+        throw new Error(
+          'This wallet signed differently than when your journal was encrypted. ' +
+            'Unlock with your recovery key instead.',
+        );
+      }
+      if (kcv === 'none') await createKcv(wallet, candidate);
+      keyRef.current = candidate;
+      setState('unlocked');
     } catch (err) {
       if (keyRef.current === null) {
         setState((s) => (s === 'mismatch' ? s : 'locked'));
       }
       throw err;
     }
-  }, [wallet, signMessageAsync, finishUnlock]);
+  }, [wallet, signMessageAsync]);
 
   const unlockWithRecoveryKey = useCallback(
     async (hex: string) => {
@@ -150,15 +150,29 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
           false,
           ['encrypt', 'decrypt'],
         );
-        await finishUnlock(candidate, wallet);
-      } catch (err) {
-        if (keyRef.current === null) {
-          setState((s) => (s === 'mismatch' ? s : 'locked'));
+        const kcv = await verifyKcv(wallet, candidate);
+        if (kcv === 'none') {
+          // Never let a recovery key initialize the KCV: a typo here would
+          // poison every future signature unlock on this device.
+          throw new Error(
+            'No journal is initialized on this device for this wallet yet — use "Sign to unlock" first.',
+          );
         }
+        if (kcv === 'bad') {
+          // A wrong recovery key is NOT a wallet-determinism problem — do not
+          // trap the UI in the mismatch state (which hides "Sign to unlock").
+          throw new Error(
+            "That recovery key doesn't match this journal — check for typos and try again.",
+          );
+        }
+        keyRef.current = candidate;
+        setState('unlocked');
+      } catch (err) {
+        if (keyRef.current === null) setState('locked');
         throw err;
       }
     },
-    [wallet, finishUnlock],
+    [wallet],
   );
 
   const lock = useCallback(() => {
@@ -172,9 +186,25 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       message: getKeyDerivationMessage(CURRENT_KEY_VERSION),
     });
     const material = await deriveKeyMaterial(signature);
-    let hex = '';
-    for (const byte of material) hex += byte.toString(16).padStart(2, '0');
-    return hex;
+    // Never export an unverified key: for non-deterministic wallets this fresh
+    // signature may derive a key that CANNOT decrypt the journal — exporting
+    // it (and letting it overwrite a good backup) would be silent data loss.
+    const candidate = await crypto.subtle.importKey(
+      'raw',
+      material as BufferSource,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt', 'decrypt'],
+    );
+    const kcv = await verifyKcv(wallet, candidate);
+    if (kcv === 'bad') {
+      throw new Error(
+        'The signature your wallet just produced does not match the key protecting ' +
+          'this journal, so this export would NOT decrypt your data. Keep your ' +
+          'existing recovery key — do not overwrite it.',
+      );
+    }
+    return bytesToHex(material);
   }, [wallet, signMessageAsync]);
 
   const getKey = useCallback(() => keyRef.current, []);

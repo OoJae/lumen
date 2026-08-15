@@ -28,6 +28,7 @@ import {
   PRIVATE_MODE_HEADER,
   PRIVATE_MODE_VALUE,
   PROOF_HEADER,
+  WHISPER_MODEL_ID,
   type ChatMessage,
   type AttestationInfo,
 } from '@lumen/shared';
@@ -126,6 +127,34 @@ export function reflectDemo(
     tokens: tokens(),
     finalize: () => buildDemoAttestation(model, opts?.reason ?? 'no-key'),
   };
+}
+
+/** Voice can't ride the chat credential: an `app-sk-` is locked to ONE provider
+ *  (ours serves GLM-5.1, not whisper), so transcription uses its own Router
+ *  `sk-` key. Abort window is wider than chat's — whisper processes a clip. */
+const TRANSCRIBE_TIMEOUT_MS = 45_000;
+
+/**
+ * Whisper transcription on 0G (TeeML) — the ONLY place that knows how Lumen
+ * talks to 0G for audio, mirroring reflectStream for chat. W3's Direct-SDK /
+ * wallet-signed migration edits this seam, not the route.
+ */
+export async function transcribeAudio(file: File): Promise<string> {
+  const client = new OpenAI({
+    apiKey: process.env.ZG_VOICE_API_KEY,
+    baseURL: process.env.ZG_VOICE_BASE_URL || ROUTER_BASE_URL,
+    timeout: TRANSCRIBE_TIMEOUT_MS,
+    maxRetries: 0,
+  });
+  const result = await client.audio.transcriptions.create(
+    {
+      file,
+      model: process.env.ZG_VOICE_MODEL || WHISPER_MODEL_ID,
+      response_format: 'json',
+    },
+    { headers: { [PRIVATE_MODE_HEADER]: PRIVATE_MODE_VALUE } },
+  );
+  return typeof result.text === 'string' ? result.text.trim() : '';
 }
 
 function delay(ms: number): Promise<void> {

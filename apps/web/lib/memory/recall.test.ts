@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { JournalTurn } from '@lumen/shared';
 
+import { recallRelevant, type RecallableTurn } from './recall';
 import { buildContext, buildContextWithRecall, MAX_CONTEXT_TURNS } from './session';
 import { cosineSimilarity, rankBySimilarity } from './vectorMath';
 
@@ -70,5 +71,28 @@ describe('buildContextWithRecall', () => {
     // each windowed turn contributes user+assistant, plus the new entry
     expect(messages).toHaveLength(MAX_CONTEXT_TURNS * 2 + 1);
     expect(messages[0]!.content).toBe(`e${4}`); // oldest turns dropped
+  });
+});
+
+describe('recallRelevant — never blocks the reflect loop', () => {
+  // No DOM Worker in the node test env, so embed() rejects immediately: these
+  // assert the failure paths return [] rather than throwing or hanging.
+  function turns(count: number, withVectors: boolean): RecallableTurn[] {
+    return Array.from({ length: count }, (_, i) => ({
+      ...turn(`t${i}`, `entry ${i}`),
+      embedding: withVectors ? [1, 0] : undefined,
+    }));
+  }
+
+  it('returns [] when everything is inside the session window (no embed attempted)', async () => {
+    await expect(recallRelevant('q', turns(MAX_CONTEXT_TURNS, true))).resolves.toEqual([]);
+  });
+
+  it('returns [] without embedding when no candidate has a vector', async () => {
+    await expect(recallRelevant('q', turns(MAX_CONTEXT_TURNS + 4, false))).resolves.toEqual([]);
+  });
+
+  it('swallows embedder failure and returns []', async () => {
+    await expect(recallRelevant('q', turns(MAX_CONTEXT_TURNS + 4, true))).resolves.toEqual([]);
   });
 });

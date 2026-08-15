@@ -8,6 +8,7 @@ import {
   decryptSnapshot,
   encryptSnapshot,
   packVector,
+  snapshotBucketBytes,
   unpackVector,
 } from './snapshot';
 
@@ -36,7 +37,8 @@ describe('snapshot codec', () => {
   it('round-trips encrypt → decrypt with full binding checks', async () => {
     const key = await deriveAesKey(SIG_A);
     const snapshot = sampleSnapshot();
-    const bytes = await encryptSnapshot(key, snapshot);
+    const { bytes, paddedBytes } = await encryptSnapshot(key, snapshot);
+    expect(paddedBytes).toBe(4096); // power-of-two bucket, not the envelope length
     const restored = await decryptSnapshot(key, bytes, { wallet: WALLET, keyVersion: 1, seq: 3 });
     expect(restored).toEqual(snapshot);
     expect(restored.wallet).toBe(WALLET.toLowerCase());
@@ -45,8 +47,8 @@ describe('snapshot codec', () => {
 
   it('produces deterministic plaintext: same snapshot → same padded size bucket', async () => {
     const key = await deriveAesKey(SIG_A);
-    const a = await encryptSnapshot(key, sampleSnapshot());
-    const b = await encryptSnapshot(key, sampleSnapshot());
+    const a = (await encryptSnapshot(key, sampleSnapshot())).bytes;
+    const b = (await encryptSnapshot(key, sampleSnapshot())).bytes;
     // IVs differ, so ciphertexts differ — but the envelope byte length only
     // varies by base64 of same-length buffers, proving stable bucketing.
     expect(a.length).toBe(b.length);
@@ -54,14 +56,14 @@ describe('snapshot codec', () => {
 
   it('supports restore-by-rootHash: seq omitted, read back from the AAD', async () => {
     const key = await deriveAesKey(SIG_A);
-    const bytes = await encryptSnapshot(key, sampleSnapshot(7));
+    const { bytes } = await encryptSnapshot(key, sampleSnapshot(7));
     const restored = await decryptSnapshot(key, bytes, { wallet: WALLET, keyVersion: 1 });
     expect(restored.seq).toBe(7);
   });
 
   it('rejects another wallet\'s snapshot', async () => {
     const key = await deriveAesKey(SIG_A);
-    const bytes = await encryptSnapshot(key, sampleSnapshot());
+    const { bytes } = await encryptSnapshot(key, sampleSnapshot());
     await expect(
       decryptSnapshot(key, bytes, { wallet: OTHER_WALLET, keyVersion: 1 }),
     ).rejects.toThrow(/different wallet/);
@@ -69,7 +71,7 @@ describe('snapshot codec', () => {
 
   it('rejects a seq replay (snapshot 3 presented as snapshot 5)', async () => {
     const key = await deriveAesKey(SIG_A);
-    const bytes = await encryptSnapshot(key, sampleSnapshot(3));
+    const { bytes } = await encryptSnapshot(key, sampleSnapshot(3));
     await expect(
       decryptSnapshot(key, bytes, { wallet: WALLET, keyVersion: 1, seq: 5 }),
     ).rejects.toThrow(/seq mismatch/);
@@ -78,7 +80,7 @@ describe('snapshot codec', () => {
   it('rejects the wrong key', async () => {
     const keyA = await deriveAesKey(SIG_A);
     const keyB = await deriveAesKey(SIG_B);
-    const bytes = await encryptSnapshot(keyA, sampleSnapshot());
+    const { bytes } = await encryptSnapshot(keyA, sampleSnapshot());
     await expect(
       decryptSnapshot(keyB, bytes, { wallet: WALLET, keyVersion: 1 }),
     ).rejects.toThrow();
@@ -92,6 +94,17 @@ describe('snapshot codec', () => {
         keyVersion: 1,
       }),
     ).rejects.toThrow(/unreadable envelope/);
+  });
+
+  it('reports the padded plaintext bucket, not the uploaded envelope size', async () => {
+    const key = await deriveAesKey(SIG_A);
+    const snapshot = sampleSnapshot();
+    const { bytes, paddedBytes } = await encryptSnapshot(key, snapshot);
+    // Bucket is a power of two and matches the standalone helper…
+    expect(paddedBytes).toBe(snapshotBucketBytes(snapshot));
+    expect(Number.isInteger(Math.log2(paddedBytes))).toBe(true);
+    // …and is NOT the base64-inflated envelope JSON length.
+    expect(bytes.length).toBeGreaterThan(paddedBytes);
   });
 
   it('vector codec round-trips through base64 with dim validation', () => {
