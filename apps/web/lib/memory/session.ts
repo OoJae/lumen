@@ -26,3 +26,31 @@ export function buildContext(turns: JournalTurn[], newEntry: string): ChatMessag
 export function newTurnId(): string {
   return `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * Wave 2: session context + an embeddings-recall block. Recalled entries are
+ * prepended as one system message (the gateway's own system prompt still goes
+ * first, server-side) so older, relevant moments inform the reflection without
+ * bloating the turn-by-turn context.
+ */
+export function buildContextWithRecall(
+  turns: JournalTurn[],
+  recalled: JournalTurn[],
+  newEntry: string,
+): ChatMessage[] {
+  const base = buildContext(turns, newEntry);
+  if (recalled.length === 0) return base;
+  const block = recalled
+    .map((turn) => `[${turn.createdAt.slice(0, 10)}] ${turn.entry}`)
+    .join('\n\n');
+  return [
+    {
+      role: 'system',
+      content:
+        'Earlier entries from this journal, in the writer\'s own words — quietly ' +
+        'draw on them when they are relevant:\n\n' +
+        block,
+    },
+    ...base,
+  ];
+}
