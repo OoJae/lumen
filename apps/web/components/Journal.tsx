@@ -5,15 +5,18 @@ import type { AttestationInfo, JournalTurn } from '@lumen/shared';
 import { AppHeader } from './AppHeader';
 import { DailyPrompt } from './DailyPrompt';
 import { JournalComposer } from './JournalComposer';
+import { MemoryStrip } from './MemoryStrip';
 import { ReflectionCard } from './ReflectionCard';
 import { AttestationViewer } from './AttestationViewer';
 import { LockIcon, SparkIcon } from './icons';
+import { useJournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useStreamingReflection } from '@/lib/hooks/useStreamingReflection';
-import { buildContext, newTurnId } from '@/lib/memory/session';
+import { recallRelevant } from '@/lib/memory/recall';
+import { buildContextWithRecall, newTurnId } from '@/lib/memory/session';
 import { promptOfTheDay } from '@/lib/prompts';
 
 export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?: boolean }) {
-  const [turns, setTurns] = useState<JournalTurn[]>([]);
+  const memory = useJournalMemory();
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [viewer, setViewer] = useState<AttestationInfo | null>(null);
   const { text, attestation, status, error, reflect, reset } = useStreamingReflection();
@@ -25,10 +28,13 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   );
 
   const streaming = status === 'streaming';
+  const turns = memory.turns;
 
   async function handleSubmit(entry: string) {
     setActiveEntry(entry);
-    const result = await reflect(buildContext(turns, entry));
+    // Recall reaches beyond the session window; failures fall back to [].
+    const recalled = await recallRelevant(entry, turns);
+    const result = await reflect(buildContextWithRecall(turns, recalled, entry));
     if (result && result.text) {
       const turn: JournalTurn = {
         id: newTurnId(),
@@ -37,7 +43,7 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
         attestation: result.attestation,
         createdAt: new Date().toISOString(),
       };
-      setTurns((prev) => [...prev, turn]);
+      memory.addTurn(turn);
       setActiveEntry(null);
       reset();
     }
@@ -55,6 +61,8 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
         <JournalComposer onSubmit={handleSubmit} disabled={streaming} voiceLive={voiceLive} />
 
         <TrustLine live={live} />
+
+        <MemoryStrip memory={memory} />
 
         {activeEntry && (
           <div className="mt-8">
@@ -120,14 +128,19 @@ function TrustLine({ live }: { live: boolean }) {
 
 function EmptyState() {
   return (
-    <div className="mt-14 flex flex-col items-center gap-3 text-center">
+    <div className="mt-14 flex flex-col items-center gap-4 text-center">
       <span className="grid h-11 w-11 place-items-center rounded-full bg-accent-soft text-accent">
         <SparkIcon />
       </span>
       <p className="max-w-sm text-sm leading-relaxed text-muted">
-        A private place to think. Write a line above — Lumen will reflect, and remember you within
-        this session. No wallet needed to begin.
+        A private place to think. No wallet needed to begin.
       </p>
+      <ol className="max-w-sm space-y-1.5 text-xs leading-relaxed text-muted">
+        <li>1 · Write freely — reflections run inside a hardware enclave.</li>
+        <li>2 · Tap the 🔒 badge on any reply to inspect the proof.</li>
+        <li>3 · When it&apos;s worth keeping: one signature encrypts your journal with a key only
+          your wallet holds, and saves it to 0G — yours, provably.</li>
+      </ol>
     </div>
   );
 }
