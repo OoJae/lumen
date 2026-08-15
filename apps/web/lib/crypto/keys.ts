@@ -16,8 +16,21 @@ export const KEY_DERIVATION_MESSAGE =
   'It never leaves your device and is never sent to Lumen or any server.\n\n' +
   'Version: 1';
 
-export function getKeyDerivationMessage(): string {
-  return KEY_DERIVATION_MESSAGE;
+/**
+ * All key-derivation message versions ever shipped. Rotation = add v2 here,
+ * bump CURRENT_KEY_VERSION, re-encrypt + re-upload; envelopes/snapshots record
+ * their keyVersion, so restore knows which message to ask the wallet to sign.
+ */
+export const KEY_DERIVATION_MESSAGES: Record<number, string> = {
+  1: KEY_DERIVATION_MESSAGE,
+};
+
+export const CURRENT_KEY_VERSION = 1;
+
+export function getKeyDerivationMessage(version: number = CURRENT_KEY_VERSION): string {
+  const message = KEY_DERIVATION_MESSAGES[version];
+  if (!message) throw new Error(`Unknown key derivation message version: ${version}`);
+  return message;
 }
 
 export function hexToBytes(hex: string): Uint8Array {
