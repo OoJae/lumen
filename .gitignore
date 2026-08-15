@@ -42,3 +42,4 @@ coverage/
 /docs/architecture.md
 /docs/privacy-model.md
 /docs/wave-submissions/
+tsconfig.tsbuildinfo
