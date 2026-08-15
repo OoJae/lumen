@@ -22,6 +22,7 @@ export interface ZgModel {
 
 export const ZG_MODELS: ZgModel[] = [
   { id: 'glm-5', label: 'GLM-5', family: 'Zhipu AI', modality: 'chat', verifiability: 'TeeML' },
+  { id: 'glm-5.1', label: 'GLM-5.1', family: 'Zhipu AI', modality: 'chat', verifiability: 'TeeML' },
   { id: 'deepseek-v3', label: 'DeepSeek V3', family: 'DeepSeek', modality: 'chat', verifiability: 'TeeML' },
   { id: 'gpt-oss-120b', label: 'gpt-oss-120b', family: 'OpenAI (open weights)', modality: 'chat', verifiability: 'TeeML' },
   { id: 'qwen3-vl', label: 'Qwen3-VL', family: 'Alibaba', modality: 'vision', verifiability: 'TeeML' },
@@ -30,7 +31,12 @@ export const ZG_MODELS: ZgModel[] = [
 
 // glm-5.1 is TeeML on 0G mainnet (model runs directly inside the enclave and
 // signs responses) — the strongest verifiability tier, so it's our default.
+// Verified live against the provider (and present on the Router /v1/models list).
 export const DEFAULT_MODEL_ID = 'glm-5.1';
+
+/** Speech-to-text model for voice entries (verified live on the Router, 2026-08).
+ *  Whisper's native window is ~30s / 448 tokens per request. */
+export const WHISPER_MODEL_ID = 'whisper-large-v3';
 
 /** Hardware basis of 0G Sealed Inference — shown in the attestation viewer. */
 export const TEE_HARDWARE = {
