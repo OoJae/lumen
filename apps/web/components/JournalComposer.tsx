@@ -2,18 +2,26 @@
 
 import { useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
 import { ArrowRightIcon } from './icons';
+import { VoiceButton } from './VoiceButton';
 
 export function JournalComposer({
   onSubmit,
   disabled = false,
+  voiceLive = false,
   placeholder = 'Write something…',
 }: {
   onSubmit: (entry: string) => void;
   disabled?: boolean;
+  voiceLive?: boolean;
   placeholder?: string;
 }) {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  function appendTranscript(text: string) {
+    setValue((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
+    ref.current?.focus();
+  }
 
   function submit() {
     const trimmed = value.trim();
@@ -51,11 +59,14 @@ export function JournalComposer({
         className="writing w-full resize-none bg-transparent text-ink outline-none placeholder:text-muted/70 disabled:opacity-60"
       />
       <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-muted">
-          <kbd className="rounded border border-border px-1 py-0.5 text-[10px]">⌘</kbd>
-          <span className="mx-0.5">+</span>
-          <kbd className="rounded border border-border px-1 py-0.5 text-[10px]">↵</kbd>
-          <span className="ml-1.5">to reflect</span>
+        <span className="flex items-center gap-2.5">
+          {voiceLive && <VoiceButton onTranscript={appendTranscript} />}
+          <span className="text-xs text-muted">
+            <kbd className="rounded border border-border px-1 py-0.5 text-[10px]">⌘</kbd>
+            <span className="mx-0.5">+</span>
+            <kbd className="rounded border border-border px-1 py-0.5 text-[10px]">↵</kbd>
+            <span className="ml-1.5">to reflect</span>
+          </span>
         </span>
         <button
           type="button"

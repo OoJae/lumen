@@ -70,3 +70,30 @@ export function ArrowRightIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function MicIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <rect x="9" y="3.5" width="6" height="11" rx="3" />
+      <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" />
+    </svg>
+  );
+}
+
+export function KeyIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <circle cx="8" cy="14.5" r="3.5" />
+      <path d="M10.8 12 19 4M15.5 7.5 18 10M13 10l1.8 1.8" />
+    </svg>
+  );
+}
+
+export function CloudCheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <path d="M7 18.5A4.5 4.5 0 0 1 6.6 9.6 5.5 5.5 0 0 1 17.3 11a4 4 0 0 1-.8 7.5H7Z" />
+      <path d="m9.5 14 2 2 3.5-3.7" />
+    </svg>
+  );
+}

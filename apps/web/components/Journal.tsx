@@ -12,7 +12,7 @@ import { useStreamingReflection } from '@/lib/hooks/useStreamingReflection';
 import { buildContext, newTurnId } from '@/lib/memory/session';
 import { promptOfTheDay } from '@/lib/prompts';
 
-export function Journal({ live }: { live: boolean }) {
+export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?: boolean }) {
   const [turns, setTurns] = useState<JournalTurn[]>([]);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [viewer, setViewer] = useState<AttestationInfo | null>(null);
@@ -52,7 +52,7 @@ export function Journal({ live }: { live: boolean }) {
       <main className="mx-auto max-w-2xl px-5 pb-28 pt-9">
         <DailyPrompt prompt={prompt} dateLabel={dateLabel} />
 
-        <JournalComposer onSubmit={handleSubmit} disabled={streaming} />
+        <JournalComposer onSubmit={handleSubmit} disabled={streaming} voiceLive={voiceLive} />
 
         <TrustLine live={live} />
 
