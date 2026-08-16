@@ -25,6 +25,31 @@ export type VerificationStatus =
   | 'demo'
   | 'unverified';
 
+/**
+ * A per-request TEE proof, verified in the user's browser (Wave 3) and kept
+ * with the turn. The whole triple is persisted because the provider stops
+ * serving signatures after a while — holding it means "re-check this proof"
+ * keeps working long after the endpoint has forgotten the request.
+ */
+export interface TeeProofRecord {
+  chatId: string;
+  providerAddress: string;
+  /** `requestHash:responseHash:providerType:providerIdentity:tlsFingerprint` */
+  signedText: string;
+  signature: string;
+  /** Signer the provider claimed (informational). */
+  signingAddress: string;
+  /** Signer read from the on-chain registry — what we actually checked against. */
+  teeSignerAddress: string;
+  /** SHA-256 we computed locally over the exact bytes received. */
+  responseSha256: string;
+  verifiedAt: string; // ISO-8601
+  checks: { signature: boolean; responseHash: boolean };
+}
+
+/** Which path carried this reflection — drives the honest trust copy. */
+export type InferencePath = 'gateway' | 'browser-direct' | 'demo';
+
 export interface AttestationInfo {
   verificationStatus: VerificationStatus;
   trustMode: 'private' | 'unspecified';
@@ -37,6 +62,13 @@ export interface AttestationInfo {
   learnMoreUrl: string;
   /** One honest sentence describing exactly what this attestation proves. */
   note: string;
+  // ── Wave 3 (all optional: older persisted turns stay valid) ──
+  providerAddress?: string;
+  inferencePath?: InferencePath;
+  /** From the enclave-signed statement: e.g. {type:'centralized', identity:'aliyun'}.
+   *  Drives the disclosure that the model runs at an upstream host. */
+  providerDisclosure?: { providerType: string; providerIdentity: string };
+  proof?: TeeProofRecord;
 }
 
 export interface ReflectRequest {
@@ -107,6 +139,10 @@ export interface StorageReceipt {
    *  for "are there unsaved entries?". */
   turnCount: number;
   savedAt: string; // ISO-8601
+  /** Which 0G network this root lives on. Absent on Wave-2 receipts, which
+   *  were all testnet — the app treats a missing value as such so a testnet
+   *  pointer can never masquerade as a mainnet one. */
+  network?: 'testnet' | 'mainnet';
 }
 
 /** Response shape of POST /api/transcribe (Wave 2 voice). */
