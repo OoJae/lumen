@@ -79,7 +79,8 @@ pnpm install
 cp .env.example apps/web/.env.local
 # then set ZG_COMPUTE_API_KEY (create a key at https://pc.0g.ai, deposit a little 0G)
 # optional — voice: set ZG_VOICE_API_KEY (an sk- Router key) to enable the mic
-# storage saves need only YOUR wallet + a little testnet 0G (https://faucet.0g.ai)
+# storage saves need only YOUR wallet + a little 0G. Lumen ships on 0G MAINNET
+# (saves ~0.001 0G); set NEXT_PUBLIC_ZG_NETWORK=testnet for free faucet 0G instead
 
 pnpm dev          # → http://localhost:3000
 ```
