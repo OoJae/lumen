@@ -43,3 +43,6 @@ coverage/
 /docs/privacy-model.md
 /docs/wave-submissions/
 tsconfig.tsbuildinfo
+
+# Playwright MCP scratch output
+.playwright-mcp/
