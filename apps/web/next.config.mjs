@@ -1,3 +1,14 @@
+// Fail the BUILD on a bad network value rather than white-screening the browser
+// for a dashboard typo. NEXT_PUBLIC_* is inlined at build time, so this is the
+// last moment the value can be caught.
+const zgNetwork = process.env.NEXT_PUBLIC_ZG_NETWORK?.trim().toLowerCase();
+if (zgNetwork && zgNetwork !== 'mainnet' && zgNetwork !== 'testnet') {
+  throw new Error(
+    `NEXT_PUBLIC_ZG_NETWORK="${process.env.NEXT_PUBLIC_ZG_NETWORK}" is not a 0G network. ` +
+      'Use "mainnet" or "testnet" (unset = mainnet).',
+  );
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

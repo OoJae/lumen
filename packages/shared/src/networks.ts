@@ -1,39 +1,45 @@
 /**
  * 0G network parameters — the single source of truth.
  *
- * Verified against live docs/repos (mid-2026). Mainnet "Aristotle" values are
- * high-confidence and consistent across docs.0g.ai + ChainList. The Galileo
- * testnet chainId is CONTESTED — see note below — so it is overridable via
- * NEXT_PUBLIC_ZG_CHAIN_ID.
+ * Verified against live docs/repos (2026-08). Both chainIds are settled:
+ * mainnet Aristotle 16661, testnet Galileo 16602 (confirmed by a live
+ * eth_chainId call and docs.0g.ai; older posts saying 16601 are stale).
+ *
+ * A chainId is a property of a NETWORK, never of an environment — there is
+ * deliberately no env override for it. Only endpoints (RPC, indexer) can be
+ * overridden, and only within one network (see resolveNetwork).
  */
 
 export type ZgNetworkKey = 'testnet' | 'mainnet';
 
 export interface ZgNetwork {
   key: ZgNetworkKey;
+  /** Canonical chain name, e.g. for a wallet's "add network" prompt. */
   name: string;
+  /** Human prose for badges, banners and error copy: '0G mainnet'. */
+  label: string;
   chainId: number;
   rpcUrl: string;
   explorerUrl: string;
+  /** Explorer name shown by wallets — kept beside the URL so the two can't drift. */
+  explorerName: string;
   explorerApiUrl: string;
   nativeCurrency: { name: string; symbol: string; decimals: number };
-  /** Forward-looking (Wave 2): 0G Storage flow contract + indexer endpoint. */
+  /** 0G Storage flow contract + indexer endpoint. */
   storage: { flowContract: string; indexerRpc: string };
+  /** Present on testnet only. Its ABSENCE is what gates faucet copy in the UI —
+   *  mainnet has no faucet, and no code should branch on the key to learn that. */
   faucetUrl?: string;
 }
 
-/**
- * ⚠️ CONTESTED chainId. docs.0g.ai + ChainList currently show 16602; an official
- * 0G relaunch announcement + ThirdWeb show 16601. Both resolve to the same RPC.
- * Confirm via the wallet "Add Network" prompt / https://faucet.0g.ai before
- * relying on it. Wave 1's wallet is a non-transacting stub, so this is low-risk now.
- */
 export const ZG_TESTNET: ZgNetwork = {
   key: 'testnet',
   name: '0G-Galileo-Testnet',
+  label: '0G testnet',
   chainId: 16602,
   rpcUrl: 'https://evmrpc-testnet.0g.ai',
   explorerUrl: 'https://chainscan-galileo.0g.ai',
+  explorerName: '0G Chainscan (Galileo)',
   explorerApiUrl: 'https://chainscan-galileo.0g.ai/open/api',
   nativeCurrency: { name: '0G', symbol: '0G', decimals: 18 },
   storage: {
@@ -46,9 +52,11 @@ export const ZG_TESTNET: ZgNetwork = {
 export const ZG_MAINNET: ZgNetwork = {
   key: 'mainnet',
   name: '0G-Aristotle',
+  label: '0G mainnet',
   chainId: 16661,
   rpcUrl: 'https://evmrpc.0g.ai',
   explorerUrl: 'https://chainscan.0g.ai',
+  explorerName: '0G Chainscan',
   explorerApiUrl: 'https://chainscan.0g.ai/open/api',
   nativeCurrency: { name: '0G', symbol: '0G', decimals: 18 },
   storage: {
@@ -63,23 +71,27 @@ export const ZG_NETWORKS: Record<ZgNetworkKey, ZgNetwork> = {
 };
 
 /**
- * Resolve the active network from a key, with optional chainId/rpc overrides
- * (e.g. from NEXT_PUBLIC_ env vars). Centralizes the contested-chainId handling.
+ * Resolve a network by TYPED key, optionally overriding its endpoints.
+ *
+ * The key is a union, not a string: the previous `network === 'mainnet' ? … : …`
+ * silently resolved every typo — and every unset value — to testnet. Overrides
+ * are endpoints only, and the caller supplies the ones belonging to this network,
+ * so an override can never carry one network's RPC onto the other.
+ *
+ * `||` rather than `??`: a defined-but-empty env var (how a blank dashboard
+ * field arrives) must fall through to the default, not produce `new Indexer('')`.
  */
-export function resolveNetwork(opts?: {
-  network?: string;
-  chainId?: number;
-  rpcUrl?: string;
-  indexerRpc?: string;
-}): ZgNetwork {
-  const base = opts?.network === 'mainnet' ? ZG_MAINNET : ZG_TESTNET;
+export function resolveNetwork(
+  key: ZgNetworkKey,
+  overrides?: { rpcUrl?: string; indexerRpc?: string },
+): ZgNetwork {
+  const base = ZG_NETWORKS[key];
   return {
     ...base,
-    chainId: opts?.chainId ?? base.chainId,
-    rpcUrl: opts?.rpcUrl ?? base.rpcUrl,
+    rpcUrl: overrides?.rpcUrl || base.rpcUrl,
     storage: {
       ...base.storage,
-      indexerRpc: opts?.indexerRpc ?? base.storage.indexerRpc,
+      indexerRpc: overrides?.indexerRpc || base.storage.indexerRpc,
     },
   };
 }

@@ -5,15 +5,19 @@ import { useState, type ReactNode } from 'react';
 import { RainbowKitProvider, getDefaultConfig, lightTheme } from '@rainbow-me/rainbowkit';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { zgTestnet, zgMainnet } from '@/lib/0g/chain';
+import { activeChain } from '@/lib/0g/chain';
 import { MemoryKeyProvider } from '@/lib/hooks/useMemoryKey';
 
-// Wave 1 wallet is a non-transacting "save & own" stub. WalletConnect projectId
-// is optional for injected wallets; a placeholder keeps the connector happy.
+// Exactly ONE chain is registered — the network this build talks to. Offering a
+// second chain in the switcher would invite users into the wrong-chain state we
+// then have to nag them out of, and it makes RainbowKit's own `chain.unsupported`
+// meaningless. `switchChain` still works because the target IS the configured chain.
+const chain = activeChain();
+
 const wagmiConfig = getDefaultConfig({
   appName: 'Lumen',
   projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'lumen-wavehack',
-  chains: [zgTestnet, zgMainnet],
+  chains: [chain],
   ssr: true,
 });
 
@@ -24,6 +28,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
+          initialChain={chain}
           modalSize="compact"
           theme={lightTheme({
             accentColor: '#b45309',
