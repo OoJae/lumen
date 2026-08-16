@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAccount } from 'wagmi';
 
+import { ZG_NETWORKS } from '@lumen/shared';
 import type { JournalTurn, PersistedTurnV1, StorageReceipt } from '@lumen/shared';
 
 import { decryptBytes, encryptBytes } from '@/lib/crypto/encrypt';
@@ -35,6 +36,8 @@ import {
   unpackVector,
 } from '@/lib/storage/snapshot';
 import { WrongChainError } from '@/lib/0g/chainGuard';
+import { activeNetwork, otherNetworkKey } from '@/lib/0g/network';
+import { isDirty, syncStatus, type SyncStatus } from '@/lib/storage/saveStatus';
 import { useMemoryKey, type MemoryKeyState } from './useMemoryKey';
 
 /** The 0G SDK (+ ethers) is ~250 kB — load it only when a save/restore/verify
@@ -82,7 +85,12 @@ export interface JournalMemory {
   save: {
     state: SaveState;
     error: SaveError | null;
+    /** Saved on the ACTIVE network — null means nothing is anchored here,
+     *  whatever may exist elsewhere. */
     receipt: StorageReceipt | null;
+    /** Surfaced only when the active network has no receipt but the other does. */
+    foreignReceipt: StorageReceipt | null;
+    status: SyncStatus;
     dirty: boolean;
     toZg(): Promise<StorageReceipt>;
   };
@@ -114,6 +122,7 @@ export function useJournalMemory(): JournalMemory {
   const [turns, setTurns] = useState<RecallableTurn[]>([]);
   const [lockedCount, setLockedCount] = useState(0);
   const [receipt, setReceipt] = useState<StorageReceipt | null>(null);
+  const [foreignReceipt, setForeignReceipt] = useState<StorageReceipt | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<SaveError | null>(null);
 
@@ -121,6 +130,13 @@ export function useJournalMemory(): JournalMemory {
   turnsRef.current = turns;
   const receiptRef = useRef<StorageReceipt | null>(receipt);
   receiptRef.current = receipt;
+  const foreignRef = useRef<StorageReceipt | null>(foreignReceipt);
+  foreignRef.current = foreignReceipt;
+
+  // One network per build; both keys are stable module constants.
+  const net = activeNetwork();
+  const networkKey = net.key;
+  const otherKey = otherNetworkKey();
   const walletRef = useRef<string | null>(memoryKey.wallet);
   const prevWalletRef = useRef<string | null>(null);
 
@@ -135,6 +151,7 @@ export function useJournalMemory(): JournalMemory {
       // previous wallet's save status — its errors must not leak into this one.
       setTurns([]);
       setReceipt(null);
+      setForeignReceipt(null);
       setSaveState('idle');
       setSaveError(null);
     }
@@ -252,7 +269,13 @@ export function useJournalMemory(): JournalMemory {
 
     const merged = [...hydrated, ...backfill].sort(byCreatedAt);
     setTurns(merged);
-    setReceipt(await db.getPointer(forWallet));
+    const [activePointer, otherPointer] = await Promise.all([
+      db.getPointer(forWallet, networkKey),
+      db.getPointer(forWallet, otherKey),
+    ]);
+    setReceipt(activePointer);
+    // Only surface the other network's snapshot when nothing is anchored here.
+    setForeignReceipt(activePointer ? null : otherPointer);
     setLockedCount(0);
     preloadEmbedder();
     // Re-embed anything that never got a vector (model was offline, tab closed
@@ -260,7 +283,7 @@ export function useJournalMemory(): JournalMemory {
     for (const turn of merged) {
       if (!turn.embedding) embedAndPersist(turn);
     }
-  }, [getKey, keyVersion, persistTurn, embedAndPersist]);
+  }, [getKey, keyVersion, persistTurn, embedAndPersist, networkKey, otherKey]);
 
   const unlock = useCallback(async () => {
     await memoryKey.unlock();
@@ -324,9 +347,11 @@ export function useJournalMemory(): JournalMemory {
         paddedBytes,
         turnCount: snapshot.turns.length,
         savedAt: snapshot.createdAt,
+        network: networkKey,
       };
-      await db.setPointer(forWallet, nextReceipt);
+      await db.setPointer(forWallet, networkKey, nextReceipt);
       setReceipt(nextReceipt);
+      setForeignReceipt(null);
       setSaveState('idle');
       return nextReceipt;
     } catch (err) {
@@ -350,7 +375,7 @@ export function useJournalMemory(): JournalMemory {
       });
       throw err;
     }
-  }, [connector, getKey, keyVersion]);
+  }, [connector, getKey, keyVersion, networkKey]);
 
   const restoreFromRoot = useCallback(
     async (rootHash: string): Promise<number> => {
@@ -390,9 +415,13 @@ export function useJournalMemory(): JournalMemory {
           // more turns than that, `dirty` correctly prompts a fresh save.
           turnCount: snapshot.turns.length,
           savedAt: snapshot.createdAt,
+          // Verified, not assumed: this blob was just downloaded from THIS
+          // network's indexer.
+          network: networkKey,
         };
-        await db.setPointer(forWallet, pointer);
+        await db.setPointer(forWallet, networkKey, pointer);
         setReceipt(pointer);
+        setForeignReceipt(null);
       }
 
       // Turns restored without vectors get re-embedded here, best-effort.
@@ -401,22 +430,33 @@ export function useJournalMemory(): JournalMemory {
       }
       return restored.length;
     },
-    [getKey, keyVersion, persistTurn, embedAndPersist],
+    [getKey, keyVersion, persistTurn, embedAndPersist, networkKey],
   );
+
+  const nothingSavedHere = useCallback(() => {
+    const other = foreignRef.current;
+    return new Error(
+      other
+        ? `Nothing is saved on ${net.label} yet — your last snapshot is on ${
+            ZG_NETWORKS[other.network]?.label ?? other.network
+          }.`
+        : 'Nothing saved to 0G yet',
+    );
+  }, [net.label]);
 
   const verifyOnZg = useCallback(async () => {
     const current = receiptRef.current;
-    if (!current) throw new Error('Nothing saved to 0G yet');
+    if (!current) throw nothingSavedHere();
     const { checkAvailability } = await zg();
     return checkAvailability(current.rootHash);
-  }, []);
+  }, [nothingSavedHere]);
 
   const proveOwnership = useCallback(async (): Promise<ProofResult> => {
     const key = getKey();
     const forWallet = walletRef.current;
     const current = receiptRef.current;
     if (!key || !forWallet) throw new Error('Unlock your journal first');
-    if (!current) throw new Error('Nothing saved to 0G yet');
+    if (!current) throw nothingSavedHere();
     const { downloadBlob } = await zg();
     const bytes = await downloadBlob(current.rootHash);
     const snapshot = await decryptSnapshot(key, bytes, {
@@ -425,20 +465,26 @@ export function useJournalMemory(): JournalMemory {
       seq: current.seq,
     });
     return { turnCount: snapshot.turns.length, savedAt: snapshot.createdAt };
-  }, [getKey, keyVersion]);
+  }, [getKey, keyVersion, nothingSavedHere]);
 
-  const dirty = useMemo(() => {
-    if (keyState !== 'unlocked') return false;
-    if (turns.length === 0) return false;
-    if (!receipt) return true;
-    // Count-based, not timestamp-based: wall clocks differ across devices, and
-    // a skewed clock must never hide the Save button.
-    return turns.length !== receipt.turnCount;
-  }, [keyState, turns, receipt]);
+  // Count-based, not timestamp-based: wall clocks differ across devices, and a
+  // skewed clock must never hide the Save button. Network-scoped, so a snapshot
+  // on the other chain can never read as "saved" here.
+  const status = useMemo(
+    () =>
+      syncStatus({
+        unlocked: keyState === 'unlocked',
+        turnCount: turns.length,
+        receipt,
+        foreign: foreignReceipt,
+      }),
+    [keyState, turns.length, receipt, foreignReceipt],
+  );
+  const dirty = useMemo(() => isDirty(status), [status]);
 
   const save = useMemo(
-    () => ({ state: saveState, error: saveError, receipt, dirty, toZg }),
-    [saveState, saveError, receipt, dirty, toZg],
+    () => ({ state: saveState, error: saveError, receipt, foreignReceipt, status, dirty, toZg }),
+    [saveState, saveError, receipt, foreignReceipt, status, dirty, toZg],
   );
 
   return useMemo(

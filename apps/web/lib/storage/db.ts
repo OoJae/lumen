@@ -11,9 +11,10 @@
  * One database per wallet (lumen-mem-<address>) so two wallets can never mix.
  */
 
-import type { StorageReceipt } from '@lumen/shared';
+import type { StorageReceipt, ZgNetworkKey } from '@lumen/shared';
 
 import type { EncryptedEnvelope } from '../crypto/encrypt';
+import { LEGACY_POINTER_KEY, pointerKey, stampNetwork } from './pointerKey';
 
 export interface TurnMeta {
   id: string;
@@ -29,7 +30,6 @@ const DB_VERSION = 1;
 const TURNS = 'turns';
 const VECTORS = 'vectors';
 const KV = 'kv';
-const KEY_POINTER = 'pointer';
 const KEY_KCV = 'kcv';
 
 function dbName(wallet: string): string {
@@ -119,13 +119,38 @@ export async function getVectors(
   }
 }
 
-export async function setPointer(wallet: string, receipt: StorageReceipt): Promise<void> {
-  await withStore(wallet, KV, 'readwrite', (s) => s.put(receipt, KEY_POINTER));
+export async function setPointer(
+  wallet: string,
+  network: ZgNetworkKey,
+  receipt: StorageReceipt,
+): Promise<void> {
+  const stamped: StorageReceipt = { ...receipt, network };
+  await withStore(wallet, KV, 'readwrite', (s) => s.put(stamped, pointerKey(network)));
+  // Dual-write the Wave-2 unscoped key on testnet so that promoting a
+  // pre-cutover build (the fastest rollback) still finds the NEWEST pointer and
+  // cannot fork the seq chain by reusing a seq. Drop once no pre-cutover build
+  // can be promoted.
+  if (network === 'testnet') {
+    await withStore(wallet, KV, 'readwrite', (s) => s.put(stamped, LEGACY_POINTER_KEY));
+  }
 }
 
-export async function getPointer(wallet: string): Promise<StorageReceipt | null> {
-  const value = await withStore<unknown>(wallet, KV, 'readonly', (s) => s.get(KEY_POINTER));
-  return (value as StorageReceipt | undefined) ?? null;
+export async function getPointer(
+  wallet: string,
+  network: ZgNetworkKey,
+): Promise<StorageReceipt | null> {
+  const scoped = await withStore<unknown>(wallet, KV, 'readonly', (s) =>
+    s.get(pointerKey(network)),
+  );
+  const hit = stampNetwork(scoped, network);
+  if (hit) return hit;
+  if (network !== 'testnet') return null;
+  // Read-through only — never written back, never deleted, so a Wave-2 build
+  // promoted during judging still finds its pointer exactly where it left it.
+  const legacy = await withStore<unknown>(wallet, KV, 'readonly', (s) =>
+    s.get(LEGACY_POINTER_KEY),
+  );
+  return stampNetwork(legacy, 'testnet');
 }
 
 export async function putKcv(wallet: string, envelope: EncryptedEnvelope): Promise<void> {

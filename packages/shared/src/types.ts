@@ -1,4 +1,5 @@
 /** Shared types across the client, gateway, and (later) contracts. */
+import type { ZgNetworkKey } from './networks';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 
@@ -139,10 +140,12 @@ export interface StorageReceipt {
    *  for "are there unsaved entries?". */
   turnCount: number;
   savedAt: string; // ISO-8601
-  /** Which 0G network this root lives on. Absent on Wave-2 receipts, which
-   *  were all testnet — the app treats a missing value as such so a testnet
-   *  pointer can never masquerade as a mainnet one. */
-  network?: 'testnet' | 'mainnet';
+  /** Which 0G network this root lives on. Root hashes do not cross networks, so
+   *  a receipt without one is meaningless: every read path stamps it (an
+   *  unscoped Wave-2 pointer is stamped 'testnet' in lib/storage/pointerKey.ts,
+   *  where that rule lives and is tested). Required on purpose — this field was
+   *  optional with a comment promising a guarantee no code implemented. */
+  network: ZgNetworkKey;
 }
 
 /** Response shape of POST /api/transcribe (Wave 2 voice). */
