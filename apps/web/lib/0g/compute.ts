@@ -57,48 +57,69 @@ function inferenceBaseURL(): string {
   return process.env.ZG_ROUTER_BASE_URL || ROUTER_BASE_URL;
 }
 
-/** Real Sealed Inference (Direct provider or Router), in private trust mode. */
-export async function reflectStream(
+/** Where live inference goes: the Direct provider proxy if configured, else the
+ *  hosted Router. Exported so the gateway can report the provider it used. */
+export function activeProviderUrl(): string | null {
+  return process.env.ZG_PROVIDER_URL?.replace(/\/+$/, '') ?? null;
+}
+
+export function activeModelId(override?: string): string {
+  return activeModel(override);
+}
+
+export interface RawReflectResponse {
+  /** The provider's untouched response — stream it to the client verbatim so
+   *  the browser can hash exactly what the enclave signed. */
+  response: Response;
+  model: string;
+  chatId: string | null;
+  providerAddress: string | null;
+}
+
+/**
+ * Live Sealed Inference as a RAW passthrough (Wave 3).
+ *
+ * Deliberately a plain fetch rather than the OpenAI SDK: the SDK parses chunks
+ * into objects, and re-serializing them would change the bytes. Per-request
+ * verification hashes the response body, so the gateway must forward the
+ * provider's bytes untouched or the proof cannot be checked client-side.
+ */
+export async function reflectRawResponse(
   messages: ChatMessage[],
-  opts?: { model?: string },
-): Promise<ReflectResult> {
+  opts?: { model?: string; signal?: AbortSignal },
+): Promise<RawReflectResponse> {
   const model = activeModel(opts?.model);
-  const client = new OpenAI({
-    apiKey: process.env.ZG_COMPUTE_API_KEY,
-    baseURL: inferenceBaseURL(),
-    timeout: LIVE_TIMEOUT_MS,
-    maxRetries: 0,
-  });
+  const base = inferenceBaseURL().replace(/\/+$/, '');
 
-  const { data: stream, response } = await client.chat.completions
-    .create(
-      {
-        model,
-        messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        stream: true,
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_TIMEOUT_MS);
+  opts?.signal?.addEventListener('abort', () => controller.abort(), { once: true });
+
+  let response: Response;
+  try {
+    response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.ZG_COMPUTE_API_KEY ?? ''}`,
+        [PRIVATE_MODE_HEADER]: PRIVATE_MODE_VALUE,
       },
-      { headers: { [PRIVATE_MODE_HEADER]: PRIVATE_MODE_VALUE } },
-    )
-    .withResponse();
+      body: JSON.stringify({ model, messages, stream: true }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
-  // Proof reference: the ZG-Res-Key header if present, else the streamed
-  // completion id (the chatID used for Direct-path TEE verification in W3).
-  let chatId =
-    response.headers.get(PROOF_HEADER) ??
-    response.headers.get(PROOF_HEADER.toLowerCase()) ??
-    undefined;
-
-  async function* tokens(): AsyncIterable<string> {
-    for await (const chunk of stream) {
-      if (!chatId && chunk.id) chatId = chunk.id;
-      const delta = chunk.choices?.[0]?.delta?.content;
-      if (delta) yield delta;
-    }
+  if (!response.ok || !response.body) {
+    throw new Error(`provider responded ${response.status}`);
   }
 
   return {
-    tokens: tokens(),
-    finalize: () => buildLiveAttestation(model, chatId ?? undefined),
+    response,
+    model,
+    chatId: response.headers.get(PROOF_HEADER) ?? response.headers.get(PROOF_HEADER.toLowerCase()),
+    providerAddress: response.headers.get('Provider') ?? response.headers.get('provider'),
   };
 }
 

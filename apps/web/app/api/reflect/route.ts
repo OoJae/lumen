@@ -1,28 +1,75 @@
 /**
- * The Lumen gateway (Wave 1) — a thin Next.js Route Handler that holds the 0G
- * Compute API key and proxies inference to the Router in private trust mode,
- * streaming tokens back as Server-Sent Events with a final attestation event.
+ * The Lumen gateway.
  *
- * Honest threat model: this gateway is technically in the
- * plaintext path for the inference CALL in Waves 1–2. It holds no long-term
- * plaintext and logs no entry/reflection content. Wave 3 moves to the wallet-
- * signed Direct SDK so the gateway leaves the plaintext path entirely.
+ * Wave 3 changed what this is: when inference is live, the route no longer
+ * re-frames the provider's stream — it pipes the provider's bytes through
+ * VERBATIM. That is what lets the browser verify the enclave signature over
+ * the exact bytes it received, even on a gateway-relayed response. Any
+ * re-serialization here would break the hash and silently downgrade every
+ * user's proof.
+ *
+ * Honest threat model: for the duration of the call this gateway still sees
+ * plaintext (it holds the Compute credential). It keeps no entries and logs no
+ * content, and wallet-connected users bypass it entirely via browser-direct
+ * inference. Demo mode keeps Lumen's own SSE shape and is clearly labeled.
  */
 import type { NextRequest } from 'next/server';
-import { reflectStream, reflectDemo, type ReflectResult } from '@/lib/0g/compute';
+import {
+  activeModelId,
+  activeProviderUrl,
+  reflectDemo,
+  reflectRawResponse,
+} from '@/lib/0g/compute';
 import { isComputeLive } from '@/lib/0g/env';
 import { LUMEN_SYSTEM_PROMPT } from '@/lib/prompts';
+import { foldSystemMessages } from '@/lib/memory/systemMerge';
+import { CHAT_PROVIDER_ADDRESS, PROOF_HEADER } from '@lumen/shared';
 import type { ChatMessage } from '@lumen/shared';
 
-export const runtime = 'nodejs'; // async generators + openai SDK need the Node runtime
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // headroom for slower TEE generations / the live-timeout fallback
+export const maxDuration = 60;
 
 const encoder = new TextEncoder();
+
+/** Tells the client which wire format to expect (and therefore which parser and
+ *  which trust story applies). */
+const STREAM_FORMAT_HEADER = 'X-Lumen-Stream';
+const FORMAT_PROVIDER_RAW = 'zg-openai-v1';
+const FORMAT_LUMEN_DEMO = 'lumen-v1';
 
 function sse(event: string | null, data: unknown): Uint8Array {
   const payload = typeof data === 'string' ? data : JSON.stringify(data);
   return encoder.encode(`${event ? `event: ${event}\n` : ''}data: ${payload}\n\n`);
+}
+
+function demoStream(messages: ChatMessage[], reason: 'no-key' | 'live-unavailable'): Response {
+  const result = reflectDemo(messages, { reason });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const token of result.tokens) {
+          controller.enqueue(sse(null, { token }));
+        }
+        controller.enqueue(sse('attestation', result.finalize()));
+        controller.enqueue(sse('done', { ok: true }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Inference interrupted';
+        controller.enqueue(sse('error', { message }));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      [STREAM_FORMAT_HEADER]: FORMAT_LUMEN_DEMO,
+    },
+  });
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -37,61 +84,32 @@ export async function POST(req: NextRequest): Promise<Response> {
     return new Response('`messages` is required', { status: 400 });
   }
 
-  const live = isComputeLive();
-  // The client may prepend its own system block (the W2 recall context). Fold
-  // any leading system messages into ONE — some providers reject duplicate or
-  // non-leading system roles, and that failure would silently demote every
-  // recall-bearing reflection to the demo fallback.
-  let leadingSystems = 0;
-  while (leadingSystems < messages.length && messages[leadingSystems]!.role === 'system') {
-    leadingSystems++;
+  if (!isComputeLive()) return demoStream(messages, 'no-key');
+
+  const withSystem = foldSystemMessages(messages, LUMEN_SYSTEM_PROMPT);
+
+  let raw;
+  try {
+    raw = await reflectRawResponse(withSystem);
+  } catch {
+    // Provider unreachable/timed out — a labeled mock beats a hung UI.
+    return demoStream(messages, 'live-unavailable');
   }
-  const systemContent = [
-    LUMEN_SYSTEM_PROMPT,
-    ...messages.slice(0, leadingSystems).map((m) => m.content),
-  ].join('\n\n');
-  const withSystem: ChatMessage[] = [
-    { role: 'system', content: systemContent },
-    ...messages.slice(leadingSystems),
-  ];
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      // Resolve a result. If a live provider is configured but unreachable
-      // (e.g. provider outage), fall back to a clearly-labeled demo instead of
-      // hanging or 500-ing the UI.
-      let result: ReflectResult;
-      if (live) {
-        try {
-          result = await reflectStream(withSystem);
-        } catch {
-          result = reflectDemo(messages, { reason: 'live-unavailable' });
-        }
-      } else {
-        result = reflectDemo(messages, { reason: 'no-key' });
-      }
-
-      try {
-        for await (const token of result.tokens) {
-          controller.enqueue(sse(null, { token }));
-        }
-        controller.enqueue(sse('attestation', result.finalize()));
-        controller.enqueue(sse('done', { ok: true }));
-      } catch (err) {
-        // Mid-stream failure (e.g. provider dropped after headers).
-        const message = err instanceof Error ? err.message : 'Inference interrupted';
-        controller.enqueue(sse('error', { message }));
-      } finally {
-        controller.close();
-      }
-    },
+  // Pipe the provider's body through untouched. no-transform is load-bearing:
+  // any compression rewrite downstream would change the bytes the client hashes.
+  const headers = new Headers({
+    'Content-Type': raw.response.headers.get('Content-Type') ?? 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    [STREAM_FORMAT_HEADER]: FORMAT_PROVIDER_RAW,
+    'X-Lumen-Model': raw.model || activeModelId(),
   });
+  if (raw.chatId) headers.set(PROOF_HEADER, raw.chatId);
+  headers.set('X-Lumen-Provider', raw.providerAddress ?? CHAT_PROVIDER_ADDRESS);
+  const providerUrl = activeProviderUrl();
+  // The client fetches the enclave signature straight from the provider.
+  if (providerUrl) headers.set('X-Lumen-Provider-Url', providerUrl);
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-    },
-  });
+  return new Response(raw.response.body, { headers });
 }

@@ -2,19 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ChatMessage } from '@lumen/shared';
 
-/**
- * Mirrors the gateway's system-message folding (app/api/reflect/route.ts).
- * The client may prepend a recall system block; providers can reject duplicate
- * or non-leading system roles, and that rejection would silently demote every
- * recall-bearing reflection to the demo fallback — so the gateway folds all
- * leading system messages into exactly one.
- */
-function foldSystems(messages: ChatMessage[], systemPrompt: string): ChatMessage[] {
-  let leading = 0;
-  while (leading < messages.length && messages[leading]!.role === 'system') leading++;
-  const content = [systemPrompt, ...messages.slice(0, leading).map((m) => m.content)].join('\n\n');
-  return [{ role: 'system', content }, ...messages.slice(leading)];
-}
+import { foldSystemMessages as foldSystems } from './systemMerge';
 
 const PROMPT = 'SYSTEM_PROMPT';
 
