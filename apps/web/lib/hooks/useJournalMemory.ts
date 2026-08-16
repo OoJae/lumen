@@ -34,6 +34,7 @@ import {
   snapshotBucketBytes,
   unpackVector,
 } from '@/lib/storage/snapshot';
+import { WrongChainError } from '@/lib/0g/chainGuard';
 import { useMemoryKey, type MemoryKeyState } from './useMemoryKey';
 
 /** The 0G SDK (+ ethers) is ~250 kB — load it only when a save/restore/verify
@@ -50,7 +51,16 @@ export type SaveState = 'idle' | 'saving' | 'error';
 /** Structured save failure so the UI never has to sniff provider strings. */
 export interface SaveError {
   message: string;
-  kind: 'insufficient-funds' | 'other';
+  kind: 'insufficient-funds' | 'wrong-chain' | 'rejected' | 'other';
+}
+
+/** ethers rewrites EIP-1193 code 4001 into an `ethers-user-denied:` message,
+ *  which would otherwise reach the user as raw SDK noise. */
+function isUserRejection(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  if (code === 4001 || code === 'ACTION_REJECTED') return true;
+  const message = err instanceof Error ? err.message.toLowerCase() : '';
+  return message.includes('user-denied') || message.includes('user rejected');
 }
 
 export interface ProofResult {
@@ -323,8 +333,20 @@ export function useJournalMemory(): JournalMemory {
       const { InsufficientFundsError } = await zg();
       setSaveState('error');
       setSaveError({
-        message: err instanceof Error ? err.message : 'Save failed',
-        kind: err instanceof InsufficientFundsError ? 'insufficient-funds' : 'other',
+        message:
+          isUserRejection(err) && !(err instanceof WrongChainError)
+            ? 'Save cancelled — nothing was sent.'
+            : err instanceof Error
+              ? err.message
+              : 'Save failed',
+        kind:
+          err instanceof WrongChainError
+            ? 'wrong-chain'
+            : err instanceof InsufficientFundsError
+              ? 'insufficient-funds'
+              : isUserRejection(err)
+                ? 'rejected'
+                : 'other',
       });
       throw err;
     }

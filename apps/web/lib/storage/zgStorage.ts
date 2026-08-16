@@ -17,6 +17,7 @@
 import { Indexer, MemData } from '@0gfoundation/0g-storage-ts-sdk/browser';
 import { BrowserProvider, type Eip1193Provider, type Signer } from 'ethers';
 import type { Connector } from 'wagmi';
+import { assertChainId } from '@/lib/0g/chainGuard';
 import { activeNetwork } from '@/lib/0g/network';
 
 function indexerRpc(): string {
@@ -27,8 +28,9 @@ function evmRpc(): string {
   return activeNetwork().rpcUrl;
 }
 
-/** Thrown when the signing wallet can't cover gas + the storage fee, so the UI
- *  can offer the faucet without sniffing provider message strings. */
+/** Thrown when the signing wallet can't cover gas + the storage fee. The seam
+ *  stays out of the remedy business — which remedy to show (faucet vs "send
+ *  0G") is a network question, answered in lib/storage/saveErrorCopy.ts. */
 export class InsufficientFundsError extends Error {
   constructor(message: string) {
     super(message);
@@ -36,18 +38,34 @@ export class InsufficientFundsError extends Error {
   }
 }
 
-function isInsufficientFunds(err: unknown): boolean {
+export function isInsufficientFunds(err: unknown): boolean {
   const code = (err as { code?: unknown })?.code;
   if (code === 'INSUFFICIENT_FUNDS' || code === -32000) return true;
   const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
   return message.includes('insufficient funds') || message.includes('insufficient balance');
 }
 
+/**
+ * Verify the WALLET's own chain — never React state, which can be stale.
+ *
+ * Useful side effect: ethers caches the first getNetwork() result and thereafter
+ * throws NETWORK_ERROR if the wallet moves (AbstractSigner.populateTransaction
+ * calls it before every send). So this both checks the chain AND pins it for the
+ * rest of the operation, closing the gap between check and signature.
+ */
+export async function assertSignerChain(signer: Signer, expectedChainId: number): Promise<void> {
+  const network = await signer.provider?.getNetwork();
+  if (!network) throw new Error('Wallet provider has no network');
+  assertChainId(Number(network.chainId), expectedChainId);
+}
+
 /** Bridge the active wagmi connector (EIP-1193) to the ethers signer the SDK expects. */
 export async function getStorageSigner(connector: Connector): Promise<Signer> {
   const provider = (await connector.getProvider()) as Eip1193Provider;
-  const browserProvider = new BrowserProvider(provider);
-  return browserProvider.getSigner();
+  const signer = await new BrowserProvider(provider).getSigner();
+  // Fail before any encryption work — and before the wallet is ever prompted.
+  await assertSignerChain(signer, activeNetwork().chainId);
+  return signer;
 }
 
 export interface UploadResult {
@@ -59,13 +77,20 @@ export interface UploadResult {
 }
 
 export async function uploadBlob(signer: Signer, bytes: Uint8Array): Promise<UploadResult> {
+  // Resolve ONCE so the chain we assert, the indexer we ask, and the RPC we
+  // broadcast to cannot disagree with each other.
+  const net = activeNetwork();
+  // The choke point: every write, including any future caller that builds its
+  // own signer, passes through here.
+  await assertSignerChain(signer, net.chainId);
+
   const file = new MemData(bytes);
-  const indexer = new Indexer(indexerRpc());
-  const [result, err] = await indexer.upload(file, evmRpc(), signer);
+  const indexer = new Indexer(net.storage.indexerRpc);
+  const [result, err] = await indexer.upload(file, net.rpcUrl, signer);
   if (err) {
     if (isInsufficientFunds(err)) {
       throw new InsufficientFundsError(
-        'Your wallet needs a little testnet 0G to pay the storage fee.',
+        `Your wallet needs a little ${net.nativeCurrency.symbol} to cover the 0G storage fee.`,
       );
     }
     throw new Error(`0G upload failed: ${err.message}`);
@@ -99,15 +124,4 @@ export async function checkAvailability(rootHash: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** Compute the merkle root of bytes locally, without any network call — used to
- *  predict/verify the rootHash of a snapshot before or after upload. */
-export async function computeRootHash(bytes: Uint8Array): Promise<string> {
-  const file = new MemData(bytes);
-  const [tree, err] = await file.merkleTree();
-  if (err || !tree) throw new Error(`merkle tree failed: ${err?.message ?? 'unknown'}`);
-  const root = tree.rootHash();
-  if (!root) throw new Error('merkle tree returned no root');
-  return root;
 }
