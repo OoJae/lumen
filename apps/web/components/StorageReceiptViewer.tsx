@@ -81,6 +81,7 @@ export function StorageReceiptViewer({
         </div>
 
         <div className="rounded-xl border border-border bg-canvas/50 px-4 py-1">
+          <Field label="Network" value={activeNetwork().label} />
           <Field label="Memory root" value={receipt.rootHash} mono />
           {receipt.txHash ? <Field label="Storage tx" value={receipt.txHash} mono /> : null}
           <Field label="Snapshot #" value={String(receipt.seq)} />

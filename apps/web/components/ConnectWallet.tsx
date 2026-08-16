@@ -10,7 +10,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 export function ConnectWallet() {
   return (
     <ConnectButton.Custom>
-      {({ account, chain, openAccountModal, openConnectModal, mounted }) => {
+      {({ account, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {
         const ready = mounted;
         const connected = ready && account && chain;
         return (
@@ -19,7 +19,17 @@ export function ConnectWallet() {
             aria-hidden={!ready}
             className="transition-opacity"
           >
-            {connected ? (
+            {connected && chain.unsupported ? (
+              // Never render a normal-looking address while the wallet is on a
+              // chain Lumen doesn't write to.
+              <button
+                type="button"
+                onClick={openChainModal}
+                className="rounded-full border border-caution/50 bg-caution/10 px-3.5 py-1.5 text-sm font-medium text-caution transition-colors hover:border-caution"
+              >
+                Wrong network
+              </button>
+            ) : connected ? (
               <button
                 type="button"
                 onClick={openAccountModal}

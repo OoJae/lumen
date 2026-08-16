@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 
+import { activeNetwork } from '@/lib/0g/network';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
+import { useChainGuard } from '@/lib/hooks/useChainGuard';
+import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
+import { foreignPointerNotice } from '@/lib/storage/saveStatus';
 import { CloudCheckIcon, KeyIcon, LockIcon } from './icons';
 import { OnboardingSheet } from './OnboardingSheet';
 import { RecoveryKeyModal } from './RecoveryKeyModal';
@@ -16,7 +20,10 @@ type OpenModal = 'onboarding' | 'receipt' | 'recovery' | null;
  */
 export function MemoryStrip({ memory }: { memory: JournalMemory }) {
   const [open, setOpen] = useState<OpenModal>(null);
+  const [copiedAddress, setCopiedAddress] = useState(false);
   const { keyState, turns, lockedCount, save } = memory;
+  const net = activeNetwork();
+  const guard = useChainGuard();
 
   const modal = (
     <>
@@ -99,16 +106,38 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2.5">
       <SyncChip memory={memory} onOpenReceipt={() => setOpen('receipt')} />
-      {save.dirty && (
-        <button
-          type="button"
-          onClick={() => void save.toZg().catch(() => {})}
-          disabled={save.state === 'saving'}
-          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90 disabled:opacity-50"
-        >
-          <CloudCheckIcon width={13} height={13} />
-          {save.state === 'saving' ? 'Confirm in wallet…' : 'Save to 0G'}
-        </button>
+      {save.dirty &&
+        (guard.blocked ? (
+          // Pre-empt the failure rather than letting the user hit a wall: a
+          // wrong-chain save can burn a fee on the wrong network.
+          <button
+            type="button"
+            onClick={() => void guard.switchToExpected()}
+            disabled={guard.status === 'switching'}
+            className="inline-flex items-center gap-1.5 rounded-full border border-caution/50 bg-caution/10 px-3.5 py-1.5 text-xs font-medium text-caution hover:border-caution disabled:opacity-50"
+          >
+            {guard.status === 'switching'
+              ? 'Check your wallet…'
+              : `Switch to ${net.label} to save`}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void save.toZg().catch(() => {})}
+            disabled={save.state === 'saving'}
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90 disabled:opacity-50"
+          >
+            <CloudCheckIcon width={13} height={13} />
+            {save.state === 'saving' ? 'Confirm in wallet…' : 'Save to 0G'}
+          </button>
+        ))}
+
+      {/* This wallet's only snapshot is on the other network. Say exactly that —
+          never let the chip or this notice imply it is anchored here. */}
+      {save.foreignReceipt && (
+        <p className="w-full rounded-xl border border-border bg-canvas/40 px-3 py-2 text-xs leading-relaxed text-muted">
+          {foreignPointerNotice(net, save.foreignReceipt, turns.length)}
+        </p>
       )}
       <button
         type="button"
@@ -122,17 +151,52 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
       {save.state === 'error' && save.error && (
         <span className="w-full text-xs text-caution">
           {save.error.kind === 'insufficient-funds' ? (
+            (() => {
+              const remedy = insufficientFundsRemedy(net, memory.wallet);
+              return (
+                <>
+                  {remedy.text}
+                  {remedy.link && (
+                    <>
+                      {' '}
+                      <a
+                        href={remedy.link.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        {remedy.link.label}
+                      </a>
+                      .
+                    </>
+                  )}
+                  {remedy.address && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(remedy.address!).then(() => {
+                          setCopiedAddress(true);
+                          setTimeout(() => setCopiedAddress(false), 1600);
+                        });
+                      }}
+                      className="ml-1.5 rounded border border-caution/40 px-1.5 py-0.5 font-mono text-[11px] hover:border-caution"
+                    >
+                      {copiedAddress ? 'copied ✓' : remedy.address}
+                    </button>
+                  )}
+                </>
+              );
+            })()
+          ) : save.error.kind === 'wrong-chain' ? (
             <>
-              Your wallet needs a little testnet 0G to pay the storage fee — grab some at{' '}
-              <a
-                href="https://faucet.0g.ai"
-                target="_blank"
-                rel="noopener noreferrer"
+              {save.error.message}{' '}
+              <button
+                type="button"
+                onClick={() => void guard.switchToExpected()}
                 className="underline"
               >
-                faucet.0g.ai
-              </a>
-              .
+                Switch to {net.label}
+              </button>
             </>
           ) : (
             save.error.message

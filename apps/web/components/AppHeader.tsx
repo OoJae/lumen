@@ -1,5 +1,6 @@
 import { ThemeToggle } from './ThemeToggle';
 import { ConnectWallet } from './ConnectWallet';
+import { NetworkBadge } from './NetworkBadge';
 
 export function AppHeader() {
   return (
@@ -10,6 +11,7 @@ export function AppHeader() {
           <span className="hidden text-xs text-muted sm:inline">· private by proof</span>
         </div>
         <div className="flex items-center gap-2.5">
+          <NetworkBadge />
           <ConnectWallet />
           <ThemeToggle />
         </div>

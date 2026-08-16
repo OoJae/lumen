@@ -8,7 +8,9 @@ import { JournalComposer } from './JournalComposer';
 import { MemoryStrip } from './MemoryStrip';
 import { ReflectionCard } from './ReflectionCard';
 import { AttestationViewer } from './AttestationViewer';
+import { ChainGuardBanner } from './ChainGuardBanner';
 import { LockIcon, SparkIcon } from './icons';
+import { activeNetwork } from '@/lib/0g/network';
 import { useJournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useStreamingReflection } from '@/lib/hooks/useStreamingReflection';
 import { preloadEmbedder } from '@/lib/memory/embeddings';
@@ -92,6 +94,8 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
         />
 
         <TrustLine live={live} />
+
+        <ChainGuardBanner />
 
         <MemoryStrip memory={memory} />
 
@@ -177,13 +181,27 @@ function EmptyState() {
 }
 
 function SiteFooter() {
+  const net = activeNetwork();
   return (
     <footer className="border-t border-border/70">
       <div className="mx-auto max-w-2xl px-5 py-6 text-xs leading-relaxed text-muted">
         <p>
           <span className="font-serif text-sm text-ink">Lumen</span> — own your mind, prove your
-          privacy. Built on 0G: Compute (TEE inference) today; Storage, ERC-7857 ownership, and
-          payments across Waves 2–4.
+          privacy. Built on 0G: TEE inference verified in your browser, encrypted memory on 0G
+          Storage, and an ERC-7857 companion you own.
+        </p>
+        {/* Verifiable, not decorative: same frozen network object the uploader reads. */}
+        <p className="mt-1.5">
+          Running on <span className="font-medium text-ink">{net.label}</span> · chain{' '}
+          {net.chainId} ·{' '}
+          <a
+            href={net.explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-ink hover:underline"
+          >
+            {new URL(net.explorerUrl).host}
+          </a>
         </p>
       </div>
     </footer>
