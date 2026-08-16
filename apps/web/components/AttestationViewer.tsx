@@ -38,6 +38,8 @@ export function AttestationViewer({
 
   const { label, tone } = statusPresentation(attestation.verificationStatus);
   const isDemo = attestation.verificationStatus === 'demo';
+  const isAlarm = tone === 'alarm';
+  const proof = attestation.proof;
   const when = new Date(attestation.timestamp).toLocaleString();
 
   return (
@@ -56,7 +58,11 @@ export function AttestationViewer({
           <div className="flex items-center gap-2.5">
             <span
               className={`grid h-9 w-9 place-items-center rounded-full ${
-                isDemo ? 'bg-caution/10 text-caution' : 'bg-accent-soft text-accent'
+                isAlarm
+                  ? 'bg-red-500/10 text-red-500'
+                  : isDemo
+                    ? 'bg-caution/10 text-caution'
+                    : 'bg-accent-soft text-accent'
               }`}
             >
               <ShieldIcon />
@@ -64,9 +70,13 @@ export function AttestationViewer({
             <div>
               <p className="font-serif text-lg leading-tight text-ink">{label}</p>
               <p className="text-xs text-muted">
-                {tone === 'verified'
-                  ? 'Processed inside a hardware enclave'
-                  : 'Mock response — no live enclave'}
+                {isAlarm
+                  ? 'The signature did not match these bytes'
+                  : tone === 'verified'
+                    ? 'Processed inside a hardware enclave'
+                    : tone === 'muted'
+                      ? 'Checking the enclave signature…'
+                      : 'Mock response — no live enclave'}
               </p>
             </div>
           </div>
@@ -86,21 +96,64 @@ export function AttestationViewer({
           <Field label="GPU" value={attestation.teeHardware} />
           <Field label="Model" value={attestation.model} />
           <Field label="Time" value={when} />
+          {attestation.inferencePath ? (
+            <Field
+              label="Path"
+              value={
+                attestation.inferencePath === 'browser-direct'
+                  ? 'browser → 0G provider (Lumen not in the path)'
+                  : attestation.inferencePath === 'gateway'
+                    ? "relayed by Lumen's gateway"
+                    : 'local mock'
+              }
+            />
+          ) : null}
           {attestation.proofReference ? (
             <Field label="Proof ref (ZG-Res-Key)" value={attestation.proofReference.chatId} mono />
           ) : null}
         </div>
+
+        {proof && (
+          <div className="mt-4 rounded-xl border border-border bg-canvas/50 px-4 py-1">
+            <Field
+              label="Enclave signature"
+              value={proof.checks.signature ? 'matches on-chain signer ✓' : 'DOES NOT MATCH ✕'}
+            />
+            <Field
+              label="Response hash"
+              value={proof.checks.responseHash ? 'matches these bytes ✓' : 'DOES NOT MATCH ✕'}
+            />
+            <Field label="TEE signer (on-chain)" value={proof.teeSignerAddress} mono />
+            <Field label="SHA-256 of response" value={proof.responseSha256} mono />
+            <Field label="Verified at" value={new Date(proof.verifiedAt).toLocaleString()} />
+          </div>
+        )}
 
         <p className="mt-4 text-sm leading-relaxed text-muted">{attestation.note}</p>
 
         {!isDemo && (
           <div className="mt-4 rounded-xl border border-border bg-canvas/40 p-3 text-xs leading-relaxed text-muted">
             <p className="mb-1 font-medium text-ink">What this proves — honestly</p>
-            Your words were processed in private trust mode inside a TEE, so the model provider
-            could not read them. In Waves 1–2, inference is proxied through Lumen&apos;s gateway to
-            keep the API key secret, so the gateway is technically in the plaintext path for the
-            call (it stores no entries and logs no content). Per-request{' '}
-            <em>cryptographic</em> verification arrives in Wave 3 via the wallet-signed Direct SDK.
+            {proof?.checks.signature && proof.checks.responseHash ? (
+              <>
+                Your browser checked this itself: the bytes above hash to the value the
+                provider&apos;s enclave signed, and that signature recovers to the enclave key the
+                provider registered on-chain. Nothing between the enclave and this device altered
+                the response — not the network, not Lumen&apos;s gateway.{' '}
+                {attestation.inferencePath === 'gateway' &&
+                  'The gateway still relays the request itself, so it sees the prompt for the duration of the call; it stores nothing and logs nothing. '}
+                What is <em>not</em> proven: the request digest in the signed statement (we display
+                it but have not confirmed how the provider derives it), so we make no claim that
+                your prompt is cryptographically bound to this response.
+              </>
+            ) : (
+              <>
+                This reflection ran in private trust mode inside the provider&apos;s enclave, but a
+                per-request signature was not confirmed on this device
+                {proof ? ' — the check did not pass' : ' (the provider expires signatures)'}. The
+                trust-mode attestation still applies; newer reflections verify automatically.
+              </>
+            )}
           </div>
         )}
 

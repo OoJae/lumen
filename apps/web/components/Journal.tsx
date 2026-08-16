@@ -141,8 +141,8 @@ function TrustLine({ live }: { live: boolean }) {
     return (
       <p className="mt-3 flex items-center gap-1.5 text-xs text-muted">
         <LockIcon width={12} height={12} />
-        Every reflection runs in 0G&apos;s private trust mode inside a hardware TEE. Tap the badge on
-        any reply to inspect the proof.
+        Every reflection is checked in your browser against the enclave&apos;s signature — no wallet
+        needed. Tap the badge on any reply to inspect the proof.
       </p>
     );
   }
