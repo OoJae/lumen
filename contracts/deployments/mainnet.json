@@ -1,0 +1,14 @@
+{
+  "contract": "LumenCompanion",
+  "address": "0x0FD618664FFAc86ef734C0C46eFF23bD73CBd738",
+  "deployer": "0x446106F3E5b94C297C5c45bC0958ACD86C861CcB",
+  "txHash": "0x7ba38b3921d78c8ceef54e0bc05945e2dcd70397f1caeffd405bce6e8f75ff8e",
+  "blockNumber": 41801714,
+  "gasUsed": "1938673",
+  "chainId": 16661,
+  "network": "mainnet",
+  "solc": "0.8.24",
+  "evmVersion": "cancun",
+  "optimizerRuns": 200,
+  "deployedAt": "2026-08-16T14:14:57.329Z"
+}
