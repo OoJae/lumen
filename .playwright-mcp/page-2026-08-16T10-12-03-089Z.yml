@@ -1,0 +1,30 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - generic [ref=e7]: Lumen
+          - generic [ref=e8]: · private by proof
+        - generic [ref=e9]:
+          - button "Save & own" [ref=e11]
+          - button "Switch to dark mode" [ref=e12]
+    - main [ref=e15]:
+      - generic [ref=e16]:
+        - paragraph [ref=e17]: Sunday 16 August
+        - heading "What has been quietly on your mind today?" [level=1] [ref=e18]
+      - generic [ref=e19]:
+        - textbox "Journal entry" [ref=e20]:
+          - /placeholder: Write something…
+        - generic [ref=e21]:
+          - generic [ref=e22]: ⌘+↵to reflect
+          - button "Reflect" [disabled] [ref=e24]
+      - paragraph [ref=e27]: Every reflection runs in 0G's private trust mode inside a hardware TEE. Tap the badge on any reply to inspect the proof.
+      - generic [ref=e32]:
+        - paragraph [ref=e36]: A private place to think. No wallet needed to begin.
+        - list [ref=e37]:
+          - listitem [ref=e38]: 1 · Write freely — reflections run inside a hardware enclave.
+          - listitem [ref=e39]: 2 · Tap the 🔒 badge on any reply to inspect the proof.
+          - listitem [ref=e40]: "3 · When it's worth keeping: one signature encrypts your journal with a key only your wallet holds, and saves it to 0G — yours, provably."
+    - contentinfo [ref=e41]:
+      - paragraph [ref=e43]: "Lumen — own your mind, prove your privacy. Built on 0G: Compute (TEE inference) today; Storage, ERC-7857 ownership, and payments across Waves 2–4."
+  - alert [ref=e44]

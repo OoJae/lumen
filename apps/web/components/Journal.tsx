@@ -16,6 +16,15 @@ import { recallRelevant } from '@/lib/memory/recall';
 import { buildContextWithRecall, newTurnId } from '@/lib/memory/session';
 import { promptOfTheDay } from '@/lib/prompts';
 
+function formatJournalDate(date: Date, timeZone?: string): string {
+  return date.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
 export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?: boolean }) {
   const memory = useJournalMemory();
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
@@ -24,10 +33,13 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   const { text, attestation, status, error, reflect, reset } = useStreamingReflection();
 
   const prompt = useMemo(() => promptOfTheDay(), []);
-  const dateLabel = useMemo(
-    () => new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
-    [],
-  );
+  // The date must render identically on server and client or React bails out
+  // of hydration (#418): the server's locale/timezone is not the reader's.
+  // Render the deterministic UTC form first, then correct to local after mount.
+  const [dateLabel, setDateLabel] = useState(() => formatJournalDate(new Date(), 'UTC'));
+  useEffect(() => {
+    setDateLabel(formatJournalDate(new Date()));
+  }, []);
 
   const streaming = status === 'streaming';
   const turns = memory.turns;
