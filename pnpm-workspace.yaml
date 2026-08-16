@@ -1,8 +1,10 @@
 packages:
   - "apps/*"
   - "packages/*"
-# services/gateway and contracts are documented stubs in Wave 1 (no package.json yet);
-# they join the workspace when activated in Waves 2–3.
+  - "contracts"
+# contracts joined the workspace in Wave 3 (Hardhat: ERC-7857 companion INFT).
+# services/gateway remains a documented stub (no package.json) — the gateway
+# still lives in apps/web/app/api.
 
 # pnpm 11 build-script approvals. esbuild powers Vitest; sharp speeds Next image
 # optimization; keccak is a wallet-stack hashing dep. The ws perf addons are optional.
@@ -14,5 +16,6 @@ allowBuilds:
   keccak: true
   onnxruntime-node: false # transformers.js transitive; we use the browser/WASM backend only
   protobufjs: false # transformers.js transitive; postinstall not needed
+  secp256k1: true # hardhat toolchain native signing addon
   sharp: true
   utf-8-validate: false

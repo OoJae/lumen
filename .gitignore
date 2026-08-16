@@ -46,3 +46,8 @@ tsconfig.tsbuildinfo
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# hardhat
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/

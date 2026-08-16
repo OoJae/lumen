@@ -1,0 +1,26 @@
+{
+  "name": "@lumen/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:galileo": "hardhat run scripts/deploy.ts --network galileo",
+    "deploy:mainnet": "hardhat run scripts/deploy.ts --network mainnet",
+    "smoke:galileo": "hardhat run scripts/smoke.ts --network galileo",
+    "smoke:mainnet": "hardhat run scripts/smoke.ts --network mainnet"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@types/chai": "^4.3.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^22.0.0",
+    "dotenv": "^16.4.0",
+    "hardhat": "^2.26.0",
+    "ts-node": "^10.9.2",
+    "typescript": "5.7.2"
+  }
+}

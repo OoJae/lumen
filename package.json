@@ -10,7 +10,9 @@
     "start": "pnpm --filter @lumen/web start",
     "lint": "pnpm --filter @lumen/web lint",
     "test": "pnpm --filter @lumen/web test",
-    "typecheck": "pnpm --filter @lumen/web typecheck"
+    "typecheck": "pnpm --filter @lumen/web typecheck",
+    "contracts:build": "pnpm --filter @lumen/contracts build",
+    "contracts:test": "pnpm --filter @lumen/contracts test"
   },
   "devDependencies": {
     "typescript": "5.7.2"
