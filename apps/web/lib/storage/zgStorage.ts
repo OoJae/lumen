@@ -17,6 +17,7 @@
 import { Indexer, MemData } from '@0gfoundation/0g-storage-ts-sdk/browser';
 import { BrowserProvider, type Eip1193Provider, type Signer } from 'ethers';
 import type { Connector } from 'wagmi';
+import { ZG_MAINNET, ZG_TESTNET } from '@lumen/shared';
 import { assertChainId } from '@/lib/0g/chainGuard';
 import { activeNetwork } from '@/lib/0g/network';
 
@@ -107,9 +108,32 @@ export async function uploadBlob(signer: Signer, bytes: Uint8Array): Promise<Upl
   };
 }
 
+/** Thrown when a root hash simply is not on this network — which is the common
+ *  case for a root copied from the other one, since roots don't cross networks. */
+export class RootNotFoundError extends Error {
+  readonly name = 'RootNotFoundError';
+  constructor(readonly rootHash: string, networkLabel: string, otherLabel: string) {
+    super(
+      `No file with that root hash is on ${networkLabel}. Root hashes are per-network — ` +
+        `a snapshot saved on ${otherLabel} can't be restored here.`,
+    );
+  }
+}
+
 /** Download a blob by root hash, with merkle-proof verification on. */
 export async function downloadBlob(rootHash: string): Promise<Uint8Array> {
-  const indexer = new Indexer(indexerRpc());
+  const net = activeNetwork();
+  const indexer = new Indexer(net.storage.indexerRpc);
+
+  // Distinguish "not on this network" from a transport failure before the SDK
+  // buries it in internals — pasting the other network's root is the likeliest
+  // way to reach this path, and it deserves a sentence rather than a stack trace.
+  const located = await indexer.getFileLocations(rootHash).catch(() => null);
+  if (Array.isArray(located) && located.length === 0) {
+    const other = net.key === 'mainnet' ? ZG_TESTNET : ZG_MAINNET;
+    throw new RootNotFoundError(rootHash, net.label, other.label);
+  }
+
   const [blob, err] = await indexer.downloadToBlob(rootHash, { proof: true });
   if (err || !blob) throw new Error(`0G download failed: ${err?.message ?? 'no data'}`);
   return new Uint8Array(await blob.arrayBuffer());
