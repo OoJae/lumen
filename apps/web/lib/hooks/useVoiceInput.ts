@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { TranscribeResponse } from '@lumen/shared';
 
+import { toWhisperWav } from '@/lib/media/wav';
+
 export type VoiceState = 'idle' | 'recording' | 'transcribing' | 'error';
 
 export interface VoiceInput {
@@ -83,9 +85,11 @@ export function useVoiceInput(onTranscript: (text: string) => void): VoiceInput 
         }
         setState('transcribing');
         try {
+          // 0G's Whisper endpoint rejects webm/mp4 (verified live), so the
+          // recording is re-encoded on-device to 16 kHz mono WAV first.
+          const wav = await toWhisperWav(blob);
           const form = new FormData();
-          const ext = type.includes('mp4') ? 'mp4' : 'webm';
-          form.append('file', new File([blob], `entry.${ext}`, { type }));
+          form.append('file', new File([wav], 'entry.wav', { type: 'audio/wav' }));
           const res = await fetch('/api/transcribe', { method: 'POST', body: form });
           const body = (await res.json()) as TranscribeResponse & { error?: string };
           if (!res.ok) throw new Error(body.error ?? `Transcription failed (${res.status})`);
