@@ -126,11 +126,24 @@ export async function downloadBlob(rootHash: string): Promise<Uint8Array> {
   const indexer = new Indexer(net.storage.indexerRpc);
 
   // Distinguish "not on this network" from a transport failure before the SDK
-  // buries it in internals — pasting the other network's root is the likeliest
-  // way to reach this path, and it deserves a sentence rather than a stack trace.
-  const located = await indexer.getFileLocations(rootHash).catch(() => null);
+  // buries it — pasting the other network's root (or an anchored root that was
+  // never a storage root) is the likeliest way to reach this path, and without
+  // this pre-check downloadToBlob hangs indefinitely instead of failing.
+  //
+  // Verified live: the indexer THROWS `file not found` for an unknown root
+  // rather than returning an empty array, so both shapes are handled.
+  const other = net.key === 'mainnet' ? ZG_TESTNET : ZG_MAINNET;
+  let located: unknown = null;
+  try {
+    located = await indexer.getFileLocations(rootHash);
+  } catch (err) {
+    const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+    if (message.includes('not found')) {
+      throw new RootNotFoundError(rootHash, net.label, other.label);
+    }
+    // A genuine transport problem — let the download attempt report it.
+  }
   if (Array.isArray(located) && located.length === 0) {
-    const other = net.key === 'mainnet' ? ZG_TESTNET : ZG_MAINNET;
     throw new RootNotFoundError(rootHash, net.label, other.label);
   }
 
