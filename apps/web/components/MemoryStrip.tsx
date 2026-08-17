@@ -9,6 +9,7 @@ import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
 import { foreignPointerNotice } from '@/lib/storage/saveStatus';
+import { FundingRemedy } from './FundingRemedy';
 import { CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
 import { MintCompanionSheet } from './MintCompanionSheet';
 import { OnboardingSheet } from './OnboardingSheet';
@@ -53,7 +54,12 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
           companion={companion}
           onClose={() => {
             setOpen(null);
-            companion.reset();
+            // Closing mid-flight is fine — the chip keeps reporting it — but
+            // resetting would cancel the receipt wait and re-offer a mint that
+            // is already on its way, which then reverts AlreadyHasCompanion.
+            const inFlight =
+              companion.tx.phase === 'signing' || companion.tx.phase === 'pending';
+            if (!inFlight) companion.reset();
           }}
         />
       )}
@@ -151,7 +157,10 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
           </button>
         ))}
 
-      <CompanionChip companion={companion} onOpenReceipt={() => setOpen('receipt')} />
+      <CompanionChip
+        companion={companion}
+        onOpenReceipt={save.receipt ? () => setOpen('receipt') : null}
+      />
 
       <CompanionBlock
         memory={memory}
@@ -284,7 +293,8 @@ function CompanionChip({
   onOpenReceipt,
 }: {
   companion: Companion;
-  onOpenReceipt: () => void;
+  /** null when there is no local receipt to show — the chip then isn't a button. */
+  onOpenReceipt: (() => void) | null;
 }) {
   const { state, tokenId, onChainRoot } = companion;
 
@@ -319,20 +329,36 @@ function CompanionChip({
         ? `Companion #${tokenId} · no root anchored yet`
         : `Companion #${tokenId} · points at ${onChainRoot ? shortRoot(onChainRoot) : '—'}`;
 
+  const title =
+    state === 'synced'
+      ? 'Your companion points at your latest saved snapshot.'
+      : state === 'anchor-only'
+        ? 'Your companion points at a snapshot that is not on this device yet.'
+        : state === 'unanchored'
+          ? 'Your companion has never pointed at a snapshot.'
+          : 'Your companion points at a different snapshot than your latest save.';
+
+  const className = `inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs ${
+    state === 'synced' ? 'border-accent/40 bg-accent-soft text-accent' : 'border-border text-muted'
+  }`;
+
+  // With no local receipt there is no receipt viewer to open, so render plain
+  // text rather than a button that silently does nothing.
+  if (!onOpenReceipt) {
+    return (
+      <span title={title} className={className}>
+        <CompanionIcon width={13} height={13} />
+        {label}
+      </span>
+    );
+  }
+
   return (
     <button
       type="button"
       onClick={onOpenReceipt}
-      title={
-        state === 'synced'
-          ? 'Your companion points at your latest saved snapshot.'
-          : 'Your companion points at a different snapshot than your latest save.'
-      }
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
-        state === 'synced'
-          ? 'border-accent/40 bg-accent-soft text-accent'
-          : 'border-border text-muted hover:border-accent/40'
-      }`}
+      title={title}
+      className={`${className} transition-colors hover:border-accent/40`}
     >
       <CompanionIcon width={13} height={13} />
       {label}
@@ -357,6 +383,39 @@ function CompanionBlock({
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const { state, tokenId, onChainRoot, tx } = companion;
+
+  // companionFailure deliberately leaves `message` empty for funding failures so
+  // the shared remedy (one faucet rule, link included) renders instead of the
+  // blank line an empty message would produce.
+  const txNotice =
+    tx.failure && tx.phase !== 'idle' ? (
+      <p className="w-full text-xs text-caution">
+        {tx.failure.funding ? (
+          <FundingRemedy
+            remedy={insufficientFundsRemedy(net, memory.wallet, {
+              cost: TYPICAL_ANCHOR_COST,
+              what: 'anchor',
+              retry: 'anchor again',
+            })}
+          />
+        ) : (
+          tx.failure.message
+        )}
+        {tx.explorerTxUrl && (tx.phase === 'reverted' || tx.phase === 'lost') && (
+          <>
+            {' '}
+            <a
+              href={tx.explorerTxUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              View tx ↗
+            </a>
+          </>
+        )}
+      </p>
+    ) : null;
 
   const anchorAction = guard.blocked ? (
     <button
@@ -412,9 +471,7 @@ function CompanionBlock({
           </p>
         )}
         {restoreError && <p className="w-full text-xs text-caution">{restoreError}</p>}
-        {tx.failure && tx.phase !== 'idle' && (
-          <p className="w-full text-xs text-caution">{tx.failure.message}</p>
-        )}
+        {txNotice}
       </div>
     );
   }
@@ -511,6 +568,18 @@ function CompanionBlock({
 
     default:
       // synced / checking / minting / anchoring / nothing-to-mint / locked …
-      return tx.failure && tx.phase !== 'idle' ? shell(<>{tx.failure.message}</>) : null;
+      // A successful restore lands here (the state advances to `synced`), so the
+      // confirmation has to survive the transition instead of unmounting with
+      // the branch that started it.
+      if (restored !== null) {
+        return shell(
+          <>Your companion and this device are pointing at the same snapshot again.</>,
+        );
+      }
+      return txNotice ? (
+        <div className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-border bg-canvas/40 px-3 py-2">
+          {txNotice}
+        </div>
+      ) : null;
   }
 }
