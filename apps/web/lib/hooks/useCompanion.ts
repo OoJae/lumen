@@ -241,12 +241,35 @@ export function useCompanion(memory: JournalMemory): Companion {
         ? parseEventLogs({ abi: LUMEN_COMPANION_ABI, eventName, logs: wait.data.logs })
         : [];
 
-    if (wait.data.status !== 'success' || logs.length === 0) {
+    if (wait.data.status !== 'success') {
+      // Genuinely mined and reverted — the fee was spent.
       setTx((t) => ({
         ...t,
         phase: 'reverted',
         failure: companionFailure(
           { kind: 'unknown', message: '' },
+          { action, phase: 'onchain', networkLabel: net.label },
+        ),
+      }));
+      void refetch();
+      return;
+    }
+
+    if (logs.length === 0) {
+      // Succeeded, but the event we expect isn't in it — most likely a
+      // misconfigured contract address or ABI drift. Do NOT call this a revert:
+      // the transaction worked, we simply can't confirm what it did.
+      setTx((t) => ({
+        ...t,
+        phase: 'reverted',
+        failure: companionFailure(
+          {
+            kind: 'unknown',
+            message:
+              `Your transaction succeeded on ${net.label}, but Lumen couldn't find the expected ` +
+              `${eventName} event in it — the contract address may be misconfigured. Lumen has ` +
+              `not changed anything on its side; check the transaction before retrying.`,
+          },
           { action, phase: 'onchain', networkLabel: net.label },
         ),
       }));

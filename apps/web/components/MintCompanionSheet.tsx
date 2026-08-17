@@ -8,6 +8,7 @@ import type { Companion } from '@/lib/hooks/useCompanion';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
+import { FundingRemedy } from './FundingRemedy';
 import { CloseIcon, CompanionIcon } from './icons';
 
 function Field({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -78,6 +79,8 @@ export function MintCompanionSheet({
         className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-border bg-surface p-6 shadow-2xl sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Closing while a mint is in flight is allowed — the chip keeps
+            reporting it — but the parent must not reset the tx state. */}
         <div className="mb-4 flex items-start justify-between">
           <div className="flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-full bg-accent-soft text-accent">
@@ -219,16 +222,17 @@ export function MintCompanionSheet({
 
             {tx.failure && (
               <p className="mt-3 text-sm text-caution">
-                {tx.failure.funding
-                  ? (() => {
-                      const remedy = insufficientFundsRemedy(net, memory.wallet, {
-                        cost: TYPICAL_MINT_COST,
-                        what: 'mint',
-                        retry: 'mint again',
-                      });
-                      return `${remedy.text}${remedy.address ? ` ${remedy.address}` : ''}`;
-                    })()
-                  : tx.failure.message}
+                {tx.failure.funding ? (
+                  <FundingRemedy
+                    remedy={insufficientFundsRemedy(net, memory.wallet, {
+                      cost: TYPICAL_MINT_COST,
+                      what: 'mint',
+                      retry: 'mint again',
+                    })}
+                  />
+                ) : (
+                  tx.failure.message
+                )}
               </p>
             )}
             {tx.phase === 'reverted' && tx.explorerTxUrl && (
