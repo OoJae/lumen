@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
+import { sameRoot, shortRoot } from '@/lib/0g/companion';
 import { activeNetwork } from '@/lib/0g/network';
+import type { Companion } from '@/lib/hooks/useCompanion';
 import type { JournalMemory, ProofResult } from '@/lib/hooks/useJournalMemory';
 import { CloseIcon, CloudCheckIcon } from './icons';
 
@@ -24,9 +26,11 @@ function Field({ label, value, mono = false }: { label: string; value: string; m
  */
 export function StorageReceiptViewer({
   memory,
+  companion,
   onClose,
 }: {
   memory: JournalMemory;
+  companion: Companion;
   onClose: () => void;
 }) {
   const receipt = memory.save.receipt;
@@ -88,6 +92,8 @@ export function StorageReceiptViewer({
           <Field label="Size (padded)" value={`${(receipt.paddedBytes / 1024).toFixed(1)} KiB`} />
           <Field label="Saved" value={new Date(receipt.savedAt).toLocaleString()} />
         </div>
+
+        <AnchorSection companion={companion} receiptRoot={receipt.rootHash} />
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
@@ -169,5 +175,95 @@ export function StorageReceiptViewer({
         </p>
       </div>
     </div>
+  );
+}
+
+/** The on-chain half of the receipt: what the companion actually points at. */
+function AnchorSection({
+  companion,
+  receiptRoot,
+}: {
+  companion: Companion;
+  receiptRoot: string;
+}) {
+  const net = activeNetwork();
+  const { state, tokenId, onChainRoot, anchorCount } = companion;
+
+  if (state === 'unreadable') {
+    return (
+      <div className="mt-4 rounded-xl border border-border bg-canvas/40 px-3 py-2 text-xs text-muted">
+        Couldn&apos;t reach {net.label} to check the anchor.{' '}
+        <button type="button" onClick={() => void companion.refetch()} className="underline">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (tokenId === null) {
+    return (
+      <p className="mt-4 rounded-xl border border-border bg-canvas/40 px-3 py-2 text-xs text-muted">
+        Not minted yet — mint your companion from the strip below to anchor this root on-chain.
+      </p>
+    );
+  }
+
+  const matches = sameRoot(onChainRoot, receiptRoot);
+
+  return (
+    <>
+      <div className="mt-4 rounded-xl border border-border bg-canvas/50 px-4 py-1">
+        <Field label="Companion" value={`#${tokenId}`} />
+        {companion.address && <Field label="Contract" value={companion.address} mono />}
+        <Field label="Anchored root" value={onChainRoot ?? 'none yet'} mono={Boolean(onChainRoot)} />
+        {/* Precisely true: anchorCount excludes the root minted with. */}
+        <Field label="Anchors since mint" value={String(anchorCount ?? 0)} />
+        <Field
+          label="This receipt"
+          value={matches ? 'Matches the anchored root ✓' : 'Different root — not anchored'}
+        />
+      </div>
+
+      {companion.explorerContractUrl && (
+        <p className="mt-2 text-xs">
+          <a
+            href={companion.explorerContractUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-muted underline hover:text-ink"
+          >
+            View contract ↗
+          </a>
+          {companion.tx.explorerTxUrl && (
+            <>
+              {' · '}
+              <a
+                href={companion.tx.explorerTxUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-muted underline hover:text-ink"
+              >
+                View last tx ↗
+              </a>
+            </>
+          )}
+        </p>
+      )}
+
+      <p className="mt-3 rounded-xl border border-border bg-canvas/40 p-3 text-xs leading-relaxed text-muted">
+        <span className="mb-1 block font-medium text-ink">
+          What the anchor proves — and what it doesn&apos;t
+        </span>
+        <b className="font-medium text-ink">Proves:</b> this wallet — and only the owner may
+        anchor — published this exact root to LumenCompanion on {net.label} at a specific block.
+        Each anchor is compare-and-swap, so every event names the root it replaced and the whole
+        history replays from the log with no gaps.{' '}
+        <b className="font-medium text-ink">Doesn&apos;t prove:</b> that this is your newest
+        snapshot. You can save without anchoring, and you can anchor an older root — the contract
+        has no idea which is newer. A rollback becomes publicly <em>visible</em>; it does not become
+        impossible. It also doesn&apos;t prove the snapshot is still retrievable — that&apos;s what
+        &quot;Verify on 0G&quot; checks.
+      </p>
+    </>
   );
 }

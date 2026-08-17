@@ -2,17 +2,20 @@
 
 import { useState } from 'react';
 
+import { shortRoot, TYPICAL_ANCHOR_COST } from '@/lib/0g/companion';
 import { activeNetwork } from '@/lib/0g/network';
+import { useCompanion, type Companion } from '@/lib/hooks/useCompanion';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
 import { foreignPointerNotice } from '@/lib/storage/saveStatus';
-import { CloudCheckIcon, KeyIcon, LockIcon } from './icons';
+import { CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
+import { MintCompanionSheet } from './MintCompanionSheet';
 import { OnboardingSheet } from './OnboardingSheet';
 import { RecoveryKeyModal } from './RecoveryKeyModal';
 import { StorageReceiptViewer } from './StorageReceiptViewer';
 
-type OpenModal = 'onboarding' | 'receipt' | 'recovery' | null;
+type OpenModal = 'onboarding' | 'receipt' | 'recovery' | 'mint' | null;
 
 /**
  * The memory state surface under the composer: converts "Save & own", shows
@@ -24,6 +27,8 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
   const { keyState, turns, lockedCount, save } = memory;
   const net = activeNetwork();
   const guard = useChainGuard();
+  // Owned here and passed down, so one place holds the in-flight write state.
+  const companion = useCompanion(memory);
 
   const modal = (
     <>
@@ -35,9 +40,23 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
         />
       )}
       {open === 'receipt' && (
-        <StorageReceiptViewer memory={memory} onClose={() => setOpen(null)} />
+        <StorageReceiptViewer
+          memory={memory}
+          companion={companion}
+          onClose={() => setOpen(null)}
+        />
       )}
       {open === 'recovery' && <RecoveryKeyModal memory={memory} onClose={() => setOpen(null)} />}
+      {open === 'mint' && (
+        <MintCompanionSheet
+          memory={memory}
+          companion={companion}
+          onClose={() => {
+            setOpen(null);
+            companion.reset();
+          }}
+        />
+      )}
     </>
   );
 
@@ -131,6 +150,15 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
             {save.state === 'saving' ? 'Confirm in wallet…' : 'Save to 0G'}
           </button>
         ))}
+
+      <CompanionChip companion={companion} onOpenReceipt={() => setOpen('receipt')} />
+
+      <CompanionBlock
+        memory={memory}
+        companion={companion}
+        guard={guard}
+        onMint={() => setOpen('mint')}
+      />
 
       {/* This wallet's only snapshot is on the other network. Say exactly that —
           never let the chip or this notice imply it is anchored here. */}
@@ -248,4 +276,241 @@ function SyncChip({
       {turns.length > 0 ? 'Encrypted on this device' : 'Unlocked — write to begin'}
     </span>
   );
+}
+
+/** Names a token only in states where a read actually returned one. */
+function CompanionChip({
+  companion,
+  onOpenReceipt,
+}: {
+  companion: Companion;
+  onOpenReceipt: () => void;
+}) {
+  const { state, tokenId, onChainRoot } = companion;
+
+  if (state === 'minting' || state === 'anchoring') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+        {state === 'minting' ? 'Minting your companion…' : 'Updating your anchor…'}
+      </span>
+    );
+  }
+
+  if (state === 'unreadable') {
+    return (
+      <button
+        type="button"
+        onClick={() => void companion.refetch()}
+        className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
+      >
+        <CompanionIcon width={12} height={12} />
+        Companion · couldn&apos;t check just now
+      </button>
+    );
+  }
+
+  if (tokenId === null) return null;
+
+  const label =
+    state === 'synced'
+      ? `Companion #${tokenId} · anchored`
+      : state === 'unanchored'
+        ? `Companion #${tokenId} · no root anchored yet`
+        : `Companion #${tokenId} · points at ${onChainRoot ? shortRoot(onChainRoot) : '—'}`;
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenReceipt}
+      title={
+        state === 'synced'
+          ? 'Your companion points at your latest saved snapshot.'
+          : 'Your companion points at a different snapshot than your latest save.'
+      }
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
+        state === 'synced'
+          ? 'border-accent/40 bg-accent-soft text-accent'
+          : 'border-border text-muted hover:border-accent/40'
+      }`}
+    >
+      <CompanionIcon width={13} height={13} />
+      {label}
+    </button>
+  );
+}
+
+/** The full-width companion notices: mint invitation, drift, restore-from-anchor. */
+function CompanionBlock({
+  memory,
+  companion,
+  guard,
+  onMint,
+}: {
+  memory: JournalMemory;
+  companion: Companion;
+  guard: ReturnType<typeof useChainGuard>;
+  onMint: () => void;
+}) {
+  const net = activeNetwork();
+  const [restored, setRestored] = useState<number | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const { state, tokenId, onChainRoot, tx } = companion;
+
+  const anchorAction = guard.blocked ? (
+    <button
+      type="button"
+      onClick={() => void guard.switchToExpected()}
+      disabled={guard.status === 'switching'}
+      className="shrink-0 rounded-full border border-caution/50 bg-caution/10 px-3.5 py-1.5 text-xs font-medium text-caution hover:border-caution disabled:opacity-50"
+    >
+      {guard.status === 'switching' ? 'Check your wallet…' : `Switch to ${net.label} to anchor`}
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={() => void companion.anchor()}
+      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90"
+    >
+      Anchor this save
+    </button>
+  );
+
+  async function restoreFromAnchor() {
+    if (!onChainRoot) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      setRestored(await memory.restoreFromRoot(onChainRoot));
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : 'Restore failed');
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  const restoreButton = (
+    <button
+      type="button"
+      onClick={() => void restoreFromAnchor()}
+      disabled={restoring}
+      className="shrink-0 rounded-full border border-accent/40 bg-accent-soft px-3.5 py-1.5 text-xs font-medium text-accent hover:border-accent disabled:opacity-50"
+    >
+      {restoring ? 'Downloading…' : 'Restore from your anchor'}
+    </button>
+  );
+
+  function shell(body: React.ReactNode, action?: React.ReactNode) {
+    return (
+      <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-canvas/40 px-3 py-2">
+        <p className="flex-1 text-xs leading-relaxed text-muted">{body}</p>
+        {action}
+        {restored !== null && (
+          <p className="w-full text-xs text-accent">
+            Restored {restored} {restored === 1 ? 'entry' : 'entries'} from your anchored snapshot. ✓
+          </p>
+        )}
+        {restoreError && <p className="w-full text-xs text-caution">{restoreError}</p>}
+        {tx.failure && tx.phase !== 'idle' && (
+          <p className="w-full text-xs text-caution">{tx.failure.message}</p>
+        )}
+      </div>
+    );
+  }
+
+  switch (state) {
+    case 'mintable':
+      return (
+        <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent-soft/40 px-3 py-2">
+          <p className="flex-1 text-xs leading-relaxed text-ink">
+            Your journal is saved on 0G. Mint your companion to hold that pointer on-chain — one
+            transaction, and the token never holds your words.
+          </p>
+          {guard.blocked ? (
+            <button
+              type="button"
+              onClick={() => void guard.switchToExpected()}
+              className="shrink-0 rounded-full border border-caution/50 bg-caution/10 px-3.5 py-1.5 text-xs font-medium text-caution hover:border-caution"
+            >
+              Switch to {net.label} to mint
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onMint}
+              className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90"
+            >
+              Mint companion
+            </button>
+          )}
+        </div>
+      );
+
+    case 'ahead':
+      return shell(
+        <>
+          Your companion is anchored to the snapshot before this one. One transaction moves it to
+          your latest save ({memory.save.receipt ? shortRoot(memory.save.receipt.rootHash) : '—'}) —
+          typically about {TYPICAL_ANCHOR_COST} {net.nativeCurrency.symbol}.
+        </>,
+        anchorAction,
+      );
+
+    case 'diverged':
+      return shell(
+        <>
+          Your companion points at {onChainRoot ? shortRoot(onChainRoot) : '—'}. Your latest save on
+          this device is{' '}
+          {memory.save.receipt ? shortRoot(memory.save.receipt.rootHash) : '—'}. Lumen can&apos;t
+          tell which one is newer — it can only show you both.
+        </>,
+        <span className="flex shrink-0 gap-2">
+          {anchorAction}
+          {restoreButton}
+        </span>,
+      );
+
+    case 'anchor-only':
+      return shell(
+        <>
+          This wallet owns Companion #{String(tokenId)}, and it points at{' '}
+          {onChainRoot ? shortRoot(onChainRoot) : '—'} on {net.label}. Nothing is saved on this
+          device yet — restore it here and it decrypts with the key you just unlocked.
+        </>,
+        restoreButton,
+      );
+
+    case 'unanchored':
+      return shell(
+        memory.save.receipt ? (
+          <>Your companion exists but has never pointed at a snapshot.</>
+        ) : (
+          <>
+            Your companion exists but has never pointed at a snapshot. Save to 0G first, then
+            anchor it.
+          </>
+        ),
+        memory.save.receipt ? anchorAction : undefined,
+      );
+
+    case 'unreadable':
+      return shell(
+        <>
+          Couldn&apos;t reach {net.label} to check your companion just now, so Lumen isn&apos;t
+          going to guess.
+        </>,
+        <button
+          type="button"
+          onClick={() => void companion.refetch()}
+          className="shrink-0 rounded-full border border-border px-3.5 py-1.5 text-xs font-medium text-muted hover:border-accent/40 hover:text-ink"
+        >
+          Retry
+        </button>,
+      );
+
+    default:
+      // synced / checking / minting / anchoring / nothing-to-mint / locked …
+      return tx.failure && tx.phase !== 'idle' ? shell(<>{tx.failure.message}</>) : null;
+  }
 }
