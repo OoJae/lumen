@@ -120,8 +120,10 @@ export interface MemorySnapshotV1 {
   keyVersion: number;
   /** Monotonic save counter; part of the envelope AAD. */
   seq: number;
-  /** rootHash of the previous snapshot — a tamper-EVIDENT chain. True rollback
-   *  PROTECTION arrives when Wave 3 anchors the root on-chain. */
+  /** rootHash of the previous snapshot — a tamper-EVIDENT chain. Wave 3 anchors
+   *  roots on-chain, which adds a public, timestamped witness to that chain; it
+   *  does NOT prevent the owner from anchoring an older root. See
+   *  docs/privacy-model.md ("What an on-chain anchor proves — exactly"). */
   prevRootHash: string | null;
   createdAt: string; // ISO-8601
   turns: PersistedTurnV1[];
@@ -140,6 +142,11 @@ export interface StorageReceipt {
    *  for "are there unsaved entries?". */
   turnCount: number;
   savedAt: string; // ISO-8601
+  /** The root this snapshot superseded, when known. Lets the UI say "your save
+   *  is exactly one step ahead of your on-chain anchor" as a fact rather than a
+   *  guess. Optional: Wave-2 pointers predate it and fall back to the honest
+   *  "can't tell which is newer" copy. */
+  prevRootHash?: string | null;
   /** Which 0G network this root lives on. Root hashes do not cross networks, so
    *  a receipt without one is meaningless: every read path stamps it (an
    *  unscoped Wave-2 pointer is stamped 'testnet' in lib/storage/pointerKey.ts,
