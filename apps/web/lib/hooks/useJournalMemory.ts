@@ -348,6 +348,9 @@ export function useJournalMemory(): JournalMemory {
         turnCount: snapshot.turns.length,
         savedAt: snapshot.createdAt,
         network: networkKey,
+        // What this save superseded — lets the companion UI state "one step
+        // ahead of your anchor" as a fact instead of a guess.
+        prevRootHash: snapshot.prevRootHash,
       };
       await db.setPointer(forWallet, networkKey, nextReceipt);
       setReceipt(nextReceipt);
@@ -418,6 +421,7 @@ export function useJournalMemory(): JournalMemory {
           // Verified, not assumed: this blob was just downloaded from THIS
           // network's indexer.
           network: networkKey,
+          prevRootHash: snapshot.prevRootHash,
         };
         await db.setPointer(forWallet, networkKey, pointer);
         setReceipt(pointer);

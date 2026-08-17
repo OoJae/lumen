@@ -18,15 +18,28 @@ export interface FundingRemedy {
 /** Measured on 0G mainnet: a small snapshot save is gas-dominated, ~0.001 0G. */
 const TYPICAL_SAVE_COST = '0.001';
 
+export interface RemedyOptions {
+  /** Typical cost of THIS action, e.g. '0.0003'. Defaults to a storage save. */
+  cost?: string;
+  /** What the fee is for, e.g. 'storage fee' | 'mint' | 'anchor'. */
+  what?: string;
+  /** Verb for the retry hint: 'save again' | 'mint again' | 'anchor again'. */
+  retry?: string;
+}
+
 export function insufficientFundsRemedy(
   net: ZgNetwork,
   address: string | null,
+  opts?: RemedyOptions,
 ): FundingRemedy {
   const symbol = net.nativeCurrency.symbol;
+  const cost = opts?.cost ?? TYPICAL_SAVE_COST;
+  const what = opts?.what ?? 'storage fee';
+  const retry = opts?.retry ?? 'save again';
 
   if (net.faucetUrl) {
     return {
-      text: `Your wallet needs a little ${net.label} ${symbol} to pay the storage fee — grab some at`,
+      text: `Your wallet needs a little ${net.label} ${symbol} to pay the ${what} — grab some at`,
       // Label derived from the href so the visible text cannot drift from it.
       link: { href: net.faucetUrl, label: new URL(net.faucetUrl).host },
     };
@@ -34,9 +47,9 @@ export function insufficientFundsRemedy(
 
   return {
     text:
-      `Your wallet needs a little ${symbol} on ${net.label} to pay the storage fee — a snapshot ` +
-      `this size costs roughly ${TYPICAL_SAVE_COST} ${symbol}. ${net.label} has no faucet: send ` +
-      `${symbol} to this address from an exchange or bridge, then save again.`,
+      `Your wallet needs a little ${symbol} on ${net.label} to pay the ${what} — this ` +
+      `typically costs about ${cost} ${symbol}. ${net.label} has no faucet: send ` +
+      `${symbol} to this address from an exchange or bridge, then ${retry}.`,
     address: address ?? undefined,
   };
 }

@@ -89,6 +89,15 @@ export function KeyIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function CompanionIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <path d="M12 3.2 19 7.1v9.8L12 20.8 5 16.9V7.1z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 export function CloudCheckIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props} aria-hidden>
