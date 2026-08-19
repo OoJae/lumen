@@ -21,8 +21,20 @@ import { ZG_MAINNET, ZG_TESTNET } from '@lumen/shared';
 import { assertChainId } from '@/lib/0g/chainGuard';
 import { activeNetwork } from '@/lib/0g/network';
 
+/**
+ * Where the SDK should send indexer traffic.
+ *
+ * In a browser this is our same-origin relay, NOT the indexer directly: the
+ * indexer hands back node URLs like `http://34.x.x.x:5678`, and an HTTPS page
+ * can never talk to those (mixed content — browsers block secure→insecure
+ * subresource requests unconditionally). The relay rewrites them to itself, so
+ * uploads, restores and proof-downloads all work. Node scripts, which have no
+ * such restriction, keep talking to 0G directly.
+ */
 function indexerRpc(): string {
-  return activeNetwork().storage.indexerRpc;
+  const net = activeNetwork();
+  if (typeof window === 'undefined') return net.storage.indexerRpc;
+  return `${window.location.origin}/api/zg/indexer?network=${net.key}`;
 }
 
 function evmRpc(): string {
@@ -86,7 +98,7 @@ export async function uploadBlob(signer: Signer, bytes: Uint8Array): Promise<Upl
   await assertSignerChain(signer, net.chainId);
 
   const file = new MemData(bytes);
-  const indexer = new Indexer(net.storage.indexerRpc);
+  const indexer = new Indexer(indexerRpc());
   const [result, err] = await indexer.upload(file, net.rpcUrl, signer);
   if (err) {
     if (isInsufficientFunds(err)) {
@@ -123,7 +135,7 @@ export class RootNotFoundError extends Error {
 /** Download a blob by root hash, with merkle-proof verification on. */
 export async function downloadBlob(rootHash: string): Promise<Uint8Array> {
   const net = activeNetwork();
-  const indexer = new Indexer(net.storage.indexerRpc);
+  const indexer = new Indexer(indexerRpc());
 
   // Distinguish "not on this network" from a transport failure before the SDK
   // buries it — pasting the other network's root (or an anchored root that was

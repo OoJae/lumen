@@ -20,7 +20,7 @@ Built for the **0G Bridge by AKINDO WaveHack**. This repo is **Waves 1–2**.
 | 0G module | What it gives Lumen | Status |
 |---|---|---|
 | **0G Compute — TEE Sealed Inference** | Provably-private reflection. Every inference runs in an Intel TDX + NVIDIA H100/H200 enclave; the provider can't read your prompt or memory. **This is the product.** | **Live in Wave 1** |
-| **0G Storage — Log layer** | Encrypted memory snapshots (entries + embedding vectors), encrypted client-side and **uploaded/paid by the user's own wallet**. The snapshot rootHash is the memory root Wave 3 anchors. (KV index arrives with the W3 anchor once a hosted testnet KV endpoint is documented.) | **Live in Wave 2** |
+| **0G Storage — Log layer** | Encrypted memory snapshots (entries + embedding vectors), encrypted client-side, **signed and paid for by the user's own wallet** (the encrypted bytes are relayed by Lumen because 0G's nodes are HTTP-only — see Honesty). The snapshot rootHash is the memory root Wave 3 anchors. (KV index arrives with the W3 anchor once a hosted testnet KV endpoint is documented.) | **Live in Wave 2** |
 | **0G Chain + ERC-7857 (Agentic ID)** | Your companion minted as an INFT you own, export, and transfer; an on-chain anchor for your encrypted memory root. | Wave 3 (mainnet) |
 | **0G Compute — Whisper (TeeML)** | Voice entries transcribed by whisper-large-v3 inside a TEE. | **Live in Wave 2** |
 | **0G Pay / x402** | Pay-per-use premium tier (deeper models, longer memory). | Wave 4 |
@@ -98,8 +98,12 @@ In Waves 1–2, inference is proxied through Lumen's gateway to keep the Compute
 key secret. The **TEE protects your words from the model provider**, but the
 gateway is technically in the plaintext path *for the inference and voice
 transcription calls* (it stores no entries, keeps no audio, and logs no content).
-**Stored data is different**: it is encrypted on your device and uploaded by your
-own wallet — for stored memory, Lumen is not even in the ciphertext path. What an
+**Stored data is different**: it is encrypted on your device and the upload is
+signed and paid for by your own wallet. One honest caveat: 0G's storage nodes
+serve plain HTTP, and a browser refuses to send anything from an HTTPS page to
+an HTTP one (mixed content), so Lumen relays the already-encrypted bytes to
+those nodes on the browser's behalf. It holds no key and cannot read them, and
+the on-chain transaction is still yours. What an
 on-chain observer *can* see: that your wallet saved an encrypted blob of a
 (padded) size at a time — never the content. The gateway leaves the inference
 plaintext path in Wave 3 via wallet-signed Direct-SDK inference, which also
