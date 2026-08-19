@@ -4,10 +4,11 @@ import { useState } from 'react';
 
 import { shortRoot, TYPICAL_ANCHOR_COST } from '@/lib/0g/companion';
 import { activeNetwork } from '@/lib/0g/network';
-import { useCompanion, type Companion } from '@/lib/hooks/useCompanion';
+import type { Companion } from '@/lib/hooks/useCompanion';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
+import { restoreSkippedNotice } from '@/lib/storage/deleteCopy';
 import { foreignPointerNotice } from '@/lib/storage/saveStatus';
 import { FundingRemedy } from './FundingRemedy';
 import { CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
@@ -22,14 +23,20 @@ type OpenModal = 'onboarding' | 'receipt' | 'recovery' | 'mint' | null;
  * The memory state surface under the composer: converts "Save & own", shows
  * the locked banner, and (unlocked) the honest sync chip + Save-to-0G action.
  */
-export function MemoryStrip({ memory }: { memory: JournalMemory }) {
+export function MemoryStrip({
+  memory,
+  companion,
+}: {
+  memory: JournalMemory;
+  /** Owned by Journal and passed down, so ONE place holds the in-flight write
+   *  state. Two useCompanion instances would mean two tx state machines. */
+  companion: Companion;
+}) {
   const [open, setOpen] = useState<OpenModal>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
   const { keyState, turns, lockedCount, save } = memory;
   const net = activeNetwork();
   const guard = useChainGuard();
-  // Owned here and passed down, so one place holds the in-flight write state.
-  const companion = useCompanion(memory);
 
   const modal = (
     <>
@@ -394,6 +401,7 @@ function CompanionBlock({
 }) {
   const net = activeNetwork();
   const [restored, setRestored] = useState<number | null>(null);
+  const [skippedDeleted, setSkippedDeleted] = useState(0);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const { state, tokenId, onChainRoot, tx } = companion;
@@ -455,7 +463,9 @@ function CompanionBlock({
     setRestoring(true);
     setRestoreError(null);
     try {
-      setRestored(await memory.restoreFromRoot(onChainRoot));
+      const result = await memory.restoreFromRoot(onChainRoot);
+      setRestored(result.restored);
+      setSkippedDeleted(result.skippedDeleted);
     } catch (err) {
       setRestoreError(err instanceof Error ? err.message : 'Restore failed');
     } finally {
@@ -587,7 +597,10 @@ function CompanionBlock({
       // the branch that started it.
       if (restored !== null) {
         return shell(
-          <>Your companion and this device are pointing at the same snapshot again.</>,
+          <>
+            Your companion and this device are pointing at the same snapshot again.
+            {skippedDeleted > 0 && ` ${restoreSkippedNotice(restored, skippedDeleted)}`}
+          </>,
         );
       }
       return txNotice ? (

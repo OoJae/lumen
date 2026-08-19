@@ -195,7 +195,8 @@ export function OnboardingSheet({
                 disabled={busy !== null || !restoreRoot.trim().startsWith('0x')}
                 onClick={() =>
                   void run('restore', async () => {
-                    setRestored(await memory.restoreFromRoot(restoreRoot));
+                    const result = await memory.restoreFromRoot(restoreRoot);
+                    setRestored(result.restored);
                   })
                 }
                 className="mt-2 rounded-full border border-accent/40 px-3.5 py-1.5 text-xs font-medium text-accent hover:border-accent disabled:opacity-50"

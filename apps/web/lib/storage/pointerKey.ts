@@ -30,7 +30,11 @@ export function isStorageReceipt(value: unknown): value is Omit<StorageReceipt, 
     typeof r.txHash === 'string' &&
     typeof r.paddedBytes === 'number' &&
     typeof r.turnCount === 'number' &&
-    typeof r.savedAt === 'string'
+    typeof r.savedAt === 'string' &&
+    // Optional: pointers written before delete shipped simply lack it. A
+    // non-numeric value is corruption and must fail the whole receipt rather
+    // than reach syncStatus, where it would silently compare as NaN.
+    (r.deletionCount === undefined || typeof r.deletionCount === 'number')
   );
 }
 

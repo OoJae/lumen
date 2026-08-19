@@ -20,11 +20,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAccount } from 'wagmi';
 
 import { ZG_NETWORKS } from '@lumen/shared';
-import type { JournalTurn, PersistedTurnV1, StorageReceipt } from '@lumen/shared';
+import type {
+  DeletedTurnV1,
+  JournalTurn,
+  PersistedTurnV1,
+  StorageReceipt,
+} from '@lumen/shared';
 
 import { decryptBytes, encryptBytes } from '@/lib/crypto/encrypt';
 import { bytesToVector, vectorToBytes } from '@/lib/crypto/canonical';
 import { embed, preloadEmbedder } from '@/lib/memory/embeddings';
+import {
+  backfillCandidates,
+  mergeRestored,
+  mergeTombstones,
+  orphanVectorIds,
+  sanitizeTombstones,
+  tombstoneIdSet,
+  withoutDeleted,
+} from '@/lib/memory/deletions';
 import {
   createBoundedQueue,
   DEFAULT_EMBED_CONCURRENCY,
@@ -76,6 +90,14 @@ export interface ProofResult {
   savedAt: string;
 }
 
+export interface RestoreResult {
+  /** Entries actually added to this device. */
+  restored: number;
+  /** Entries in the snapshot this device had deleted, deliberately not
+   *  restored. Surfaced so the UI can say so rather than quietly drop them. */
+  skippedDeleted: number;
+}
+
 export interface JournalMemory {
   keyState: MemoryKeyState;
   wallet: string | null;
@@ -99,7 +121,15 @@ export interface JournalMemory {
     dirty: boolean;
     toZg(): Promise<StorageReceipt>;
   };
-  restoreFromRoot(rootHash: string): Promise<number>;
+  /** Deletions recorded on this device, sorted by id. */
+  deletions: DeletedTurnV1[];
+  /**
+   * Remove one entry from this device and from every snapshot saved after
+   * this. Resolves once the local removal has COMMITTED. Never touches
+   * snapshots already on 0G — nothing can.
+   */
+  deleteTurn(turnId: string): Promise<void>;
+  restoreFromRoot(rootHash: string): Promise<RestoreResult>;
   /** Is the saved snapshot actually retrievable from 0G right now? */
   verifyOnZg(): Promise<boolean>;
   /** Re-download the saved snapshot fresh from 0G and decrypt it locally. */
@@ -130,6 +160,7 @@ export function useJournalMemory(): JournalMemory {
   const [foreignReceipt, setForeignReceipt] = useState<StorageReceipt | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<SaveError | null>(null);
+  const [deletions, setDeletions] = useState<DeletedTurnV1[]>([]);
 
   const turnsRef = useRef<RecallableTurn[]>(turns);
   turnsRef.current = turns;
@@ -137,6 +168,12 @@ export function useJournalMemory(): JournalMemory {
   receiptRef.current = receipt;
   const foreignRef = useRef<StorageReceipt | null>(foreignReceipt);
   foreignRef.current = foreignReceipt;
+  const deletionsRef = useRef<DeletedTurnV1[]>(deletions);
+  deletionsRef.current = deletions;
+  /** Checked on a hot path after every await, so a Set rather than the array. */
+  const deletedIdsRef = useRef<Set<string>>(new Set());
+  const saveStateRef = useRef<SaveState>(saveState);
+  saveStateRef.current = saveState;
 
   // One network per build; both keys are stable module constants.
   const net = activeNetwork();
@@ -159,14 +196,19 @@ export function useJournalMemory(): JournalMemory {
    * discard in-flight bookkeeping on every render that touched the key.
    */
   const embedRef = useRef<(turn: RecallableTurn) => Promise<void>>(() => Promise.resolve());
-  const embedQueue = useMemo<BoundedQueue<RecallableTurn>>(
-    () =>
-      createBoundedQueue<RecallableTurn>({
-        concurrency: DEFAULT_EMBED_CONCURRENCY,
-        run: (turn) => embedRef.current(turn),
-      }),
-    [],
-  );
+  // A ref, not useMemo: useMemo is a performance hint React is permitted to
+  // discard, and this object owns the in-flight/de-dupe bookkeeping. Losing it
+  // mid-backfill would create a second queue with an empty `known` set while
+  // the first kept running — doubling worker load on exactly the cold-model
+  // path the queue exists to protect.
+  const queueRef = useRef<BoundedQueue<RecallableTurn> | null>(null);
+  if (queueRef.current === null) {
+    queueRef.current = createBoundedQueue<RecallableTurn>({
+      concurrency: DEFAULT_EMBED_CONCURRENCY,
+      run: (turn) => embedRef.current(turn),
+    });
+  }
+  const embedQueue = queueRef.current;
 
   // Wallet transitions: anon → wallet keeps the session turns (they get
   // backfill-encrypted at unlock); wallet → other/none drops decrypted content.
@@ -235,6 +277,9 @@ export function useJournalMemory(): JournalMemory {
       return embed(turn.entry)
         .then(async (vector) => {
           if (walletRef.current !== ownerWallet) return;
+          // Deleted while the model was working: writing the vector now would
+          // leave content behind for an entry that no longer exists.
+          if (deletedIdsRef.current.has(turn.id)) return;
           setTurns((prev) =>
             prev.map((t) => (t.id === turn.id ? { ...t, embedding: vector } : t)),
           );
@@ -260,10 +305,13 @@ export function useJournalMemory(): JournalMemory {
     const forWallet = walletRef.current;
     if (!key || !forWallet) return;
 
-    const [storedTurns, storedVectors] = await Promise.all([
+    const [storedTurns, storedVectors, storedTombs, vectorIds] = await Promise.all([
       db.getTurns(forWallet),
       db.getVectors(forWallet),
+      db.getTombstones(forWallet),
+      db.getVectorIds(forWallet),
     ]);
+    const deletedIds = tombstoneIdSet(storedTombs);
 
     const vectorMap = new Map<string, number[]>();
     await Promise.all(
@@ -283,7 +331,11 @@ export function useJournalMemory(): JournalMemory {
 
     const hydrated = (
       await Promise.all(
-        storedTurns.map(async (record): Promise<RecallableTurn | null> => {
+        // A tombstoned row should not exist; if a crash left one behind it must
+        // not render. applyTombstones below then actually removes it.
+        storedTurns
+          .filter((record) => !deletedIds.has(record.meta.id))
+          .map(async (record): Promise<RecallableTurn | null> => {
           try {
             const bytes = await decryptBytes(key, record.envelope, {
               typ: 'turn',
@@ -300,9 +352,12 @@ export function useJournalMemory(): JournalMemory {
       )
     ).filter((t): t is RecallableTurn => t !== null);
 
-    // Backfill: session turns written before the wallet existed.
+    // Backfill: session turns written before the wallet existed. The deleted
+    // filter is load-bearing — without it a turn removed from the store while
+    // another tab still holds it in state is re-persisted right here, and the
+    // delete silently undoes itself.
     const known = new Set(hydrated.map((t) => t.id));
-    const backfill = turnsRef.current.filter((t) => !known.has(t.id));
+    const backfill = backfillCandidates(turnsRef.current, known, deletedIds);
     await Promise.all(backfill.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})));
 
     const merged = [...hydrated, ...backfill].sort(byCreatedAt);
@@ -315,6 +370,14 @@ export function useJournalMemory(): JournalMemory {
     // Only surface the other network's snapshot when nothing is anchored here.
     setForeignReceipt(activePointer ? null : otherPointer);
     setLockedCount(0);
+    setDeletions(storedTombs);
+    deletedIdsRef.current = deletedIds;
+    // Converge anything a crash or another tab left inconsistent. Both are
+    // idempotent and best-effort; neither blocks unlocking.
+    void db.applyTombstones(forWallet, storedTombs).catch(() => {});
+    void db
+      .deleteVectors(forWallet, orphanVectorIds(vectorIds, [...known, ...backfill.map((t) => t.id)]))
+      .catch(() => {});
     preloadEmbedder();
     // Re-embed anything that never got a vector (model was offline, tab closed
     // mid-embed, restored from another device) so recall and search cover it.
@@ -359,6 +422,58 @@ export function useJournalMemory(): JournalMemory {
     [getKey, persistTurn, embedAndPersist],
   );
 
+  /**
+   * Delete one entry. The ORDER here is the design, not a style choice.
+   *
+   * React state first, because hydrate() backfills in-memory turns back into
+   * IndexedDB — remove it from the store while it is still on screen and the
+   * next unlock puts it straight back. The store write is one committed
+   * transaction covering the turn, its vector and the tombstone, so no crash
+   * can leave the entry deleted without its marker (it returns at the next
+   * restore) or marked without being deleted (a lie the other way). And the
+   * deletion COUNTER only moves after that commit, because it is what drives
+   * `dirty`.
+   */
+  const deleteTurn = useCallback(
+    async (turnId: string): Promise<void> => {
+      const key = getKey();
+      const forWallet = walletRef.current;
+      // The marker is plaintext and needs no key, but requiring one is what
+      // keeps "locked means closed" true — and keeps lockedCount, a raw
+      // countTurns that hydrate zeroes, from describing a store it no longer
+      // matches.
+      if (!key || !forWallet) throw new Error('Unlock your journal to delete an entry');
+      // A save in flight has ALREADY captured turnsRef into a snapshot; letting
+      // a delete race it would upload the entry the user just removed.
+      if (saveStateRef.current === 'saving') {
+        throw new Error('Finishing your save — try again in a moment');
+      }
+
+      const marker: DeletedTurnV1 = { id: turnId, deletedAt: new Date().toISOString() };
+      const previous = turnsRef.current;
+
+      deletedIdsRef.current = new Set(deletedIdsRef.current).add(turnId);
+      setTurns((prev) => prev.filter((t) => t.id !== turnId));
+
+      try {
+        await db.deleteTurn(forWallet, turnId, marker.deletedAt);
+      } catch {
+        // Honest rollback: it is still on this device, so it must still be on
+        // screen. Never claim a delete that did not commit.
+        const next = new Set(deletedIdsRef.current);
+        next.delete(turnId);
+        deletedIdsRef.current = next;
+        if (walletRef.current === forWallet) setTurns(previous);
+        throw new Error("Couldn't delete that entry — it's still on this device.");
+      }
+
+      if (walletRef.current === forWallet) {
+        setDeletions((prev) => mergeTombstones(prev, [marker]));
+      }
+    },
+    [getKey],
+  );
+
   const toZg = useCallback(async (): Promise<StorageReceipt> => {
     const key = getKey();
     const forWallet = walletRef.current;
@@ -368,7 +483,21 @@ export function useJournalMemory(): JournalMemory {
     setSaveState('saving');
     setSaveError(null);
     try {
-      const current = turnsRef.current;
+      // Read tombstones fresh: another tab may have deleted since this one
+      // hydrated, and uploading an entry the user already removed would put it
+      // back on 0G permanently.
+      const freshTombs = await db.getTombstones(forWallet);
+      const allDeletions = mergeTombstones(deletionsRef.current, freshTombs);
+      const deletedIds = tombstoneIdSet(allDeletions);
+      const current = withoutDeleted(turnsRef.current, deletedIds);
+      // Converge this tab, or turns.length disagrees with the receipt's
+      // turnCount forever and the journal reads 'stale' permanently.
+      if (current.length !== turnsRef.current.length) setTurns(current);
+      if (allDeletions.length !== deletionsRef.current.length) {
+        setDeletions(allDeletions);
+        deletedIdsRef.current = deletedIds;
+      }
+
       const snapshot = buildSnapshot({
         wallet: forWallet,
         keyVersion,
@@ -379,6 +508,7 @@ export function useJournalMemory(): JournalMemory {
         vectors: current
           .filter((t): t is RecallableTurn & { embedding: number[] } => Boolean(t.embedding))
           .map((t) => packVector(t.id, t.embedding)),
+        deletions: allDeletions,
       });
       const { bytes, paddedBytes } = await encryptSnapshot(key, snapshot);
       const { getStorageSigner, uploadBlob } = await zg();
@@ -392,6 +522,7 @@ export function useJournalMemory(): JournalMemory {
         turnCount: snapshot.turns.length,
         savedAt: snapshot.createdAt,
         network: networkKey,
+        deletionCount: allDeletions.length,
         // What this save superseded — lets the companion UI state "one step
         // ahead of your anchor" as a fact instead of a guess.
         prevRootHash: snapshot.prevRootHash,
@@ -425,7 +556,7 @@ export function useJournalMemory(): JournalMemory {
   }, [connector, getKey, keyVersion, networkKey]);
 
   const restoreFromRoot = useCallback(
-    async (rootHash: string): Promise<number> => {
+    async (rootHash: string): Promise<RestoreResult> => {
       const key = getKey();
       const forWallet = walletRef.current;
       if (!key || !forWallet) throw new Error('Unlock your journal first');
@@ -433,21 +564,38 @@ export function useJournalMemory(): JournalMemory {
       const { downloadBlob } = await zg();
       const bytes = await downloadBlob(rootHash.trim());
       const snapshot = await decryptSnapshot(key, bytes, { wallet: forWallet, keyVersion });
+
+      // Learn deletions the snapshot carries BEFORE merging, and hard-delete
+      // anything they cover. This line is what makes cross-device deletion real
+      // rather than a claim: without it, a device that still holds an entry
+      // deleted elsewhere keeps it and re-publishes it on its next save.
+      const incoming = sanitizeTombstones(snapshot.deletions);
+      const localTombs = await db.getTombstones(forWallet);
+      const union = mergeTombstones(localTombs, incoming);
+      if (union.length !== localTombs.length) {
+        await db.applyTombstones(forWallet, union).catch(() => {});
+      }
+      const deletedIds = tombstoneIdSet(union);
+
       const vectorMap = new Map(
         snapshot.vectors.map((v) => [v.turnId, Array.from(unpackVector(v))]),
       );
-      const restored: RecallableTurn[] = snapshot.turns.map((t) => ({
-        ...t,
-        embedding: vectorMap.get(t.id),
-      }));
+      const restorable: RecallableTurn[] = snapshot.turns
+        .filter((t) => !deletedIds.has(t.id))
+        .map((t) => ({ ...t, embedding: vectorMap.get(t.id) }));
 
-      await Promise.all(restored.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})));
+      await Promise.all(
+        restorable.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})),
+      );
 
-      const have = new Set(turnsRef.current.map((t) => t.id));
-      const merged = [...turnsRef.current, ...restored.filter((t) => !have.has(t.id))].sort(
-        byCreatedAt,
+      const { merged, added, skippedDeleted } = mergeRestored(
+        turnsRef.current,
+        restorable,
+        deletedIds,
       );
       setTurns(merged);
+      setDeletions(union);
+      deletedIdsRef.current = deletedIds;
 
       // Never REGRESS the pointer: restoring an old receipt must not fork the
       // seq/prevRootHash chain by making the next save re-use an old seq.
@@ -466,6 +614,7 @@ export function useJournalMemory(): JournalMemory {
           // network's indexer.
           network: networkKey,
           prevRootHash: snapshot.prevRootHash,
+          deletionCount: incoming.length,
         };
         await db.setPointer(forWallet, networkKey, pointer);
         setReceipt(pointer);
@@ -474,10 +623,10 @@ export function useJournalMemory(): JournalMemory {
 
       // Same bounded queue as hydrate — a restore of hundreds of turns shares
       // one concurrency budget with everything else in flight.
-      for (const turn of restored) {
+      for (const turn of restorable) {
         if (!turn.embedding) embedQueue.push(turn.id, turn);
       }
-      return restored.length;
+      return { restored: added, skippedDeleted: snapshot.turns.length - restorable.length };
     },
     [getKey, keyVersion, persistTurn, embedQueue, networkKey],
   );
@@ -524,10 +673,11 @@ export function useJournalMemory(): JournalMemory {
       syncStatus({
         unlocked: keyState === 'unlocked',
         turnCount: turns.length,
+        deletionCount: deletions.length,
         receipt,
         foreign: foreignReceipt,
       }),
-    [keyState, turns.length, receipt, foreignReceipt],
+    [keyState, turns.length, deletions.length, receipt, foreignReceipt],
   );
   const dirty = useMemo(() => isDirty(status), [status]);
 
@@ -542,7 +692,9 @@ export function useJournalMemory(): JournalMemory {
       wallet,
       turns,
       lockedCount,
+      deletions,
       addTurn,
+      deleteTurn,
       unlock,
       unlockWithRecoveryKey,
       lock: memoryKey.lock,
@@ -557,7 +709,9 @@ export function useJournalMemory(): JournalMemory {
       wallet,
       turns,
       lockedCount,
+      deletions,
       addTurn,
+      deleteTurn,
       unlock,
       unlockWithRecoveryKey,
       memoryKey.lock,

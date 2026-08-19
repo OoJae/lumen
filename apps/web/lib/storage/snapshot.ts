@@ -12,7 +12,12 @@
  * binding (type, wallet, seq, kind) before trusting the content.
  */
 
-import type { MemorySnapshotV1, PersistedTurnV1, PersistedVectorV1 } from '@lumen/shared';
+import type {
+  DeletedTurnV1,
+  MemorySnapshotV1,
+  PersistedTurnV1,
+  PersistedVectorV1,
+} from '@lumen/shared';
 
 import { bytesToVector, canonicalJson, padToBucket, unpad, vectorToBytes } from '../crypto/canonical';
 import {
@@ -53,9 +58,12 @@ export interface BuildSnapshotParams {
   createdAt: string;
   turns: PersistedTurnV1[];
   vectors: PersistedVectorV1[];
+  /** Deletion markers to carry forward. Omit or pass [] for none. */
+  deletions?: DeletedTurnV1[];
 }
 
 export function buildSnapshot(params: BuildSnapshotParams): MemorySnapshotV1 {
+  const deletions = params.deletions ?? [];
   return {
     v: 1,
     kind: 'lumen-memory-snapshot',
@@ -66,6 +74,11 @@ export function buildSnapshot(params: BuildSnapshotParams): MemorySnapshotV1 {
     createdAt: params.createdAt,
     turns: params.turns,
     vectors: params.vectors,
+    // Spread conditionally so a journal that never deletes produces canonical
+    // bytes IDENTICAL to before this field existed — which keeps the padded
+    // bucket size and the "re-download and byte-compare" ownership check
+    // unchanged for every existing user.
+    ...(deletions.length > 0 ? { deletions } : {}),
   };
 }
 

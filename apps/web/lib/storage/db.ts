@@ -11,7 +11,7 @@
  * One database per wallet (lumen-mem-<address>) so two wallets can never mix.
  */
 
-import type { StorageReceipt, ZgNetworkKey } from '@lumen/shared';
+import type { DeletedTurnV1, StorageReceipt, ZgNetworkKey } from '@lumen/shared';
 
 import type { EncryptedEnvelope } from '../crypto/encrypt';
 import { LEGACY_POINTER_KEY, pointerKey, stampNetwork } from './pointerKey';
@@ -26,10 +26,14 @@ export interface StoredTurnRecord {
   envelope: EncryptedEnvelope;
 }
 
-const DB_VERSION = 1;
+// v2 adds the `tombstones` store. Deleting an entry has to record that it was
+// deleted, or hydrate()'s backfill and restoreFromRoot's union merge each
+// resurrect it — see lib/memory/deletions.ts.
+const DB_VERSION = 2;
 const TURNS = 'turns';
 const VECTORS = 'vectors';
 const KV = 'kv';
+const TOMBSTONES = 'tombstones';
 const KEY_KCV = 'kcv';
 
 function dbName(wallet: string): string {
@@ -44,9 +48,19 @@ function openDb(wallet: string): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(TURNS)) db.createObjectStore(TURNS);
       if (!db.objectStoreNames.contains(VECTORS)) db.createObjectStore(VECTORS);
       if (!db.objectStoreNames.contains(KV)) db.createObjectStore(KV);
+      if (!db.objectStoreNames.contains(TOMBSTONES)) db.createObjectStore(TOMBSTONES);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'));
+    // Without this an upgrade blocked by another open tab hangs the promise
+    // forever, with nothing on screen to explain why. An error is worse than
+    // success and far better than a spinner that never stops.
+    request.onblocked = () =>
+      reject(
+        new Error(
+          'Another Lumen tab is open — close it and reload to finish updating local storage.',
+        ),
+      );
   });
 }
 
@@ -62,6 +76,39 @@ async function withStore<T>(
       const request = run(db.transaction(store, mode).objectStore(store));
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * A transaction across several stores that resolves only when the browser has
+ * COMMITTED.
+ *
+ * `withStore` cannot express this: it resolves on the first request's
+ * `onsuccess`, which fires BEFORE commit, and it spans exactly one store. For a
+ * delete that is not good enough — a crash between "turn removed" and
+ * "tombstone written" would resurrect the entry at the next restore, and the
+ * opposite order would mark an entry deleted while its ciphertext remained.
+ *
+ * `run` must issue its requests synchronously. Awaiting anything non-IDB inside
+ * a transaction lets it auto-commit, and the next request throws.
+ */
+async function withTx(
+  wallet: string,
+  stores: readonly string[],
+  mode: IDBTransactionMode,
+  run: (tx: IDBTransaction) => void,
+): Promise<void> {
+  const db = await openDb(wallet);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([...stores], mode);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
+      tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
+      run(tx);
     });
   } finally {
     db.close();
@@ -160,4 +207,72 @@ export async function putKcv(wallet: string, envelope: EncryptedEnvelope): Promi
 export async function getKcv(wallet: string): Promise<EncryptedEnvelope | null> {
   const value = await withStore<unknown>(wallet, KV, 'readonly', (s) => s.get(KEY_KCV));
   return (value as EncryptedEnvelope | undefined) ?? null;
+}
+
+/**
+ * Remove these turns and their vectors, and record their tombstones — all in
+ * ONE committed transaction.
+ *
+ * Idempotent on purpose: deleting an absent key and re-putting an existing
+ * marker are both no-ops, so hydrate() and restoreFromRoot can both call this
+ * freely to converge a device that crashed mid-delete or has just learned about
+ * a deletion made elsewhere.
+ */
+export async function applyTombstones(
+  wallet: string,
+  markers: readonly DeletedTurnV1[],
+): Promise<void> {
+  if (markers.length === 0) return;
+  await withTx(wallet, [TURNS, VECTORS, TOMBSTONES], 'readwrite', (tx) => {
+    const turns = tx.objectStore(TURNS);
+    const vectors = tx.objectStore(VECTORS);
+    const tombstones = tx.objectStore(TOMBSTONES);
+    for (const marker of markers) {
+      tombstones.put(marker, marker.id);
+      turns.delete(marker.id);
+      vectors.delete(marker.id);
+    }
+  });
+}
+
+/** Delete one entry: its ciphertext, its vector, and a marker so it stays gone. */
+export async function deleteTurn(
+  wallet: string,
+  turnId: string,
+  deletedAt: string,
+): Promise<void> {
+  await applyTombstones(wallet, [{ id: turnId, deletedAt }]);
+}
+
+/** Every deletion marker for this wallet, sorted by id — deterministic because
+ *  this array is canonical-JSON'd into snapshots. */
+export async function getTombstones(wallet: string): Promise<DeletedTurnV1[]> {
+  const all = await withStore<DeletedTurnV1[]>(wallet, TOMBSTONES, 'readonly', (store) =>
+    store.getAll(),
+  );
+  return [...all].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+export async function getTurnIds(wallet: string): Promise<string[]> {
+  const keys = await withStore<IDBValidKey[]>(wallet, TURNS, 'readonly', (store) =>
+    store.getAllKeys(),
+  );
+  return keys.map(String);
+}
+
+export async function getVectorIds(wallet: string): Promise<string[]> {
+  const keys = await withStore<IDBValidKey[]>(wallet, VECTORS, 'readonly', (store) =>
+    store.getAllKeys(),
+  );
+  return keys.map(String);
+}
+
+/** Drop vectors whose turn no longer exists. A vector is derived from the entry
+ *  text and is content in its own right, so an orphan is a leak, not litter. */
+export async function deleteVectors(wallet: string, turnIds: readonly string[]): Promise<void> {
+  if (turnIds.length === 0) return;
+  await withTx(wallet, [VECTORS], 'readwrite', (tx) => {
+    const vectors = tx.objectStore(VECTORS);
+    for (const id of turnIds) vectors.delete(id);
+  });
 }

@@ -9,6 +9,9 @@ import { MemoryStrip } from './MemoryStrip';
 import { ReflectionCard } from './ReflectionCard';
 import { AttestationViewer } from './AttestationViewer';
 import { MemoryLibrary } from './MemoryLibrary';
+import { DeleteEntryDialog } from './DeleteEntryDialog';
+import { useCompanion } from '@/lib/hooks/useCompanion';
+import type { RecallableTurn } from '@/lib/memory/recall';
 import { BookIcon } from './icons';
 import { ChainGuardBanner } from './ChainGuardBanner';
 import { LockIcon, SparkIcon } from './icons';
@@ -31,10 +34,15 @@ function formatJournalDate(date: Date, timeZone?: string): string {
 
 export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?: boolean }) {
   const memory = useJournalMemory();
+  // Owned here, passed to MemoryStrip, and read by the delete dialog — which
+  // needs to know whether a root is anchored to say what deleting can and
+  // cannot undo. One instance, so there is only ever one tx state machine.
+  const companion = useCompanion(memory);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [viewer, setViewer] = useState<AttestationInfo | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<RecallableTurn | null>(null);
   // Which earlier entries the companion drew on, per reflection. Session-only
   // and deliberately NOT persisted: putting provenance on JournalTurn would
   // change the on-disk format, and this is worth showing, not storing.
@@ -108,7 +116,7 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
 
         <ChainGuardBanner />
 
-        <MemoryStrip memory={memory} />
+        <MemoryStrip memory={memory} companion={companion} />
 
         {memory.keyState === 'unlocked' && turns.length > 0 && (
           <button
@@ -158,7 +166,22 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
 
       {viewer && <AttestationViewer attestation={viewer} onClose={() => setViewer(null)} />}
 
-      {libraryOpen && <MemoryLibrary memory={memory} onClose={() => setLibraryOpen(false)} />}
+      {libraryOpen && (
+        <MemoryLibrary
+          memory={memory}
+          onClose={() => setLibraryOpen(false)}
+          onDelete={(turn) => setPendingDelete(turn)}
+        />
+      )}
+
+      {pendingDelete && (
+        <DeleteEntryDialog
+          turn={pendingDelete}
+          memory={memory}
+          anchoredRoot={companion.onChainRoot}
+          onClose={() => setPendingDelete(null)}
+        />
+      )}
 
       <SiteFooter />
     </div>

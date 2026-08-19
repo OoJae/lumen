@@ -57,3 +57,27 @@ describe('stampNetwork', () => {
     expect(stampNetwork({ nope: true }, 'mainnet')).toBeNull();
   });
 });
+
+describe('deletionCount on a receipt', () => {
+  const base = {
+    seq: 1,
+    rootHash: '0xroot',
+    txHash: '0xtx',
+    paddedBytes: 4096,
+    turnCount: 3,
+    savedAt: '2026-08-19T10:00:00.000Z',
+  };
+
+  it('accepts a receipt that predates the field', () => {
+    expect(isStorageReceipt(base)).toBe(true);
+  });
+
+  it('accepts a numeric count', () => {
+    expect(isStorageReceipt({ ...base, deletionCount: 2 })).toBe(true);
+  });
+
+  it('rejects a corrupt count rather than letting NaN reach syncStatus', () => {
+    expect(isStorageReceipt({ ...base, deletionCount: 'two' })).toBe(false);
+    expect(isStorageReceipt({ ...base, deletionCount: null })).toBe(false);
+  });
+});

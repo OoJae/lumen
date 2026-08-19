@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { PersistedTurnV1 } from '@lumen/shared';
 
+import { canonicalJson } from '../crypto/canonical';
 import { deriveAesKey } from '../crypto/keys';
+import { mergeTombstones } from '../memory/deletions';
 import {
   buildSnapshot,
   decryptSnapshot,
@@ -113,5 +115,53 @@ describe('snapshot codec', () => {
     expect(pv.model).toBe('all-MiniLM-L6-v2');
     expect(Array.from(unpackVector(pv))).toEqual([0.25, -1.5]);
     expect(() => unpackVector({ ...pv, dim: 3 })).toThrow(/dim mismatch/);
+  });
+});
+
+describe('deletions travel with the snapshot', () => {
+  const markers = [
+    { id: 'gone-1', deletedAt: '2026-08-19T10:00:00.000Z' },
+    { id: 'gone-2', deletedAt: '2026-08-19T11:00:00.000Z' },
+  ];
+
+  it('round-trips through encrypt/decrypt', async () => {
+    const key = await deriveAesKey(SIG_A);
+    const snapshot = buildSnapshot({ ...sampleSnapshot(), deletions: markers });
+    const { bytes } = await encryptSnapshot(key, snapshot);
+    const back = await decryptSnapshot(key, bytes, { wallet: WALLET, keyVersion: 1 });
+    expect(back.deletions).toEqual(markers);
+  });
+
+  it('omits the field entirely when there are none', () => {
+    const snapshot = buildSnapshot({ ...sampleSnapshot(), deletions: [] });
+    expect('deletions' in snapshot).toBe(false);
+    expect(canonicalJson(snapshot)).not.toContain('deletions');
+  });
+
+  it('produces bytes identical to a snapshot built without the field', () => {
+    // The back-compat guarantee: existing users' snapshots must not change
+    // shape, size or root hash because delete shipped.
+    const withField = buildSnapshot({ ...sampleSnapshot(), deletions: [] });
+    const withoutField = buildSnapshot(sampleSnapshot());
+    expect(canonicalJson(withField)).toBe(canonicalJson(withoutField));
+    expect(snapshotBucketBytes(withField)).toBe(snapshotBucketBytes(withoutField));
+  });
+
+  it('still decrypts a v1 snapshot that predates the field', async () => {
+    const key = await deriveAesKey(SIG_A);
+    const legacy = buildSnapshot(sampleSnapshot());
+    const { bytes } = await encryptSnapshot(key, legacy);
+    const back = await decryptSnapshot(key, bytes, { wallet: WALLET, keyVersion: 1 });
+    expect(back.deletions).toBeUndefined();
+    expect(back.turns).toHaveLength(legacy.turns.length);
+  });
+
+  it('is deterministic across differently ordered marker sets', () => {
+    const a = buildSnapshot({ ...sampleSnapshot(), deletions: mergeTombstones(markers, []) });
+    const b = buildSnapshot({
+      ...sampleSnapshot(),
+      deletions: mergeTombstones([markers[1]!], [markers[0]!]),
+    });
+    expect(canonicalJson(a)).toBe(canonicalJson(b));
   });
 });

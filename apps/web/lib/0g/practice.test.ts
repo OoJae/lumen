@@ -279,3 +279,48 @@ describe('no run-length computation is reachable', () => {
     }
   });
 });
+
+describe('sealed days outside a truncated window', () => {
+  // Regression: archiveView used to collect its cells from the WINDOWED
+  // columns, so a sparse record older than maxWeeks rendered the heading
+  // "The record starts here" above an empty list.
+  it('still lists sealed days the window cannot reach', () => {
+    const c = buildPracticeCalendar({
+      practiceDays: ['2025-08-01', '2025-08-05'],
+      today: TODAY,
+      maxWeeks: 26,
+    });
+    expect(c.truncated).toBe(true);
+    expect(c.sealedDaysInWindow).toBe(0);
+    const view = archiveView(c);
+    expect(view.mode).toBe('first-days');
+    if (view.mode === 'first-days') {
+      expect(view.days.map((d) => d.day)).toEqual(['2025-08-01', '2025-08-05']);
+    }
+  });
+
+  it('keeps a mint far outside the window in the sparse list', () => {
+    const c = buildPracticeCalendar({
+      practiceDays: ['2025-08-01', TODAY],
+      mintDay: '2025-08-01',
+      today: TODAY,
+      maxWeeks: 26,
+    });
+    const view = archiveView(c);
+    if (view.mode !== 'first-days') throw new Error('expected first-days');
+    expect(view.days.map((d) => d.day)).toEqual(['2025-08-01', TODAY]);
+    expect(view.days[0]!.state).toBe('minted');
+  });
+
+  it('sealedCells always covers every sealed day, windowed or not', () => {
+    for (const maxWeeks of [1, 3, 26, 520]) {
+      const c = buildPracticeCalendar({
+        practiceDays: ['2025-01-01', '2025-08-01', '2026-08-19'],
+        today: TODAY,
+        maxWeeks,
+      });
+      expect(c.sealedCells).toHaveLength(c.sealedDays);
+      expect(c.sealedCells.map((x) => x.day)).toEqual(['2025-01-01', '2025-08-01', '2026-08-19']);
+    }
+  });
+});

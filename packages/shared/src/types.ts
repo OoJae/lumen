@@ -111,6 +111,21 @@ export interface PersistedVectorV1 {
   dataB64: string;
 }
 
+/**
+ * A deleted entry. The id survives, the content does not.
+ *
+ * Without this a delete silently undoes itself: hydrate() backfills in-memory
+ * turns into IndexedDB, and restoreFromRoot union-merges an older snapshot, so
+ * either path resurrects what you removed. Keeping the id is what makes
+ * "deleted" survive a restore — here and on another device.
+ */
+export interface DeletedTurnV1 {
+  id: string;
+  /** ISO-8601, from the device that deleted it. Merges keep the EARLIEST, so
+   *  re-learning a deletion never moves the date forward. */
+  deletedAt: string;
+}
+
 export interface MemorySnapshotV1 {
   v: 1;
   kind: 'lumen-memory-snapshot';
@@ -128,6 +143,17 @@ export interface MemorySnapshotV1 {
   createdAt: string; // ISO-8601
   turns: PersistedTurnV1[];
   vectors: PersistedVectorV1[];
+  /**
+   * Entries the owner deleted, carried in EVERY later snapshot so a restore on
+   * another device cannot resurrect them.
+   *
+   * Optional and additive on purpose. `v` stays 1 because decryptSnapshot hard-
+   * rejects v !== 1, so a version bump would make every existing snapshot
+   * unreadable to guard a case the local tombstone store already covers.
+   * Omitted entirely when empty, so a journal that never deletes produces
+   * byte-identical snapshots to before this existed.
+   */
+  deletions?: DeletedTurnV1[];
 }
 
 /** Receipt for one user-signed "Save to 0G" upload; kept locally as the pointer. */
@@ -153,6 +179,14 @@ export interface StorageReceipt {
    *  where that rule lives and is tested). Required on purpose — this field was
    *  optional with a comment promising a guarantee no code implemented. */
   network: ZgNetworkKey;
+  /**
+   * How many deletions the saving device had recorded when this snapshot was
+   * written. `turnCount` alone cannot see a delete-plus-add — 5 → 4 → 5 reads
+   * as unchanged while the content differs — and deletions are append-only, so
+   * comparing this monotonic counter closes that hole exactly. Optional:
+   * pointers written before delete shipped read as 0.
+   */
+  deletionCount?: number;
 }
 
 /** Response shape of POST /api/transcribe (Wave 2 voice). */

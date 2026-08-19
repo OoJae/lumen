@@ -53,6 +53,16 @@ export interface PracticeCalendar {
    *  just because the strip was truncated. */
   sealedDays: number;
   sealedDaysInWindow: number;
+  /**
+   * A cell for EVERY sealed day, in order, regardless of the window.
+   *
+   * The windowed `columns` are for the grid; this is the source of truth for
+   * counts and for the sparse view. Deriving the sparse view from `columns`
+   * instead silently dropped sealed days that fell outside a truncated window
+   * — a two-day-old record with maxWeeks 26 rendered "The record starts here"
+   * above an empty list.
+   */
+  sealedCells: DayCell[];
   /** firstDay → today inclusive. Present for labelling only; never render this
    *  as a denominator (see constraint 1). */
   spanDays: number;
@@ -168,6 +178,7 @@ export function buildPracticeCalendar(input: PracticeCalendarInput): PracticeCal
       lastDay: null,
       sealedDays: 0,
       sealedDaysInWindow: 0,
+      sealedCells: [],
       spanDays: 0,
       truncated: false,
     };
@@ -212,12 +223,19 @@ export function buildPracticeCalendar(input: PracticeCalendarInput): PracticeCal
     previousMonth = month;
   }
 
+  const sealedCells: DayCell[] = sealed.map((day) => {
+    const daySeqs = [...(seqs[day] ?? [])];
+    const state: DayState = mintDay && day === mintDay ? 'minted' : 'sealed';
+    return { day, state, seqs: daySeqs, title: cellTitle(day, state, daySeqs) };
+  });
+
   return {
     columns,
     firstDay,
     lastDay,
     sealedDays: sealed.length,
     sealedDaysInWindow,
+    sealedCells,
     spanDays: dayDiff(firstDay, today) + 1,
     truncated,
   };
@@ -238,10 +256,9 @@ export type ArchiveView =
 export function archiveView(calendar: PracticeCalendar): ArchiveView {
   if (calendar.sealedDays === 0) return { mode: 'empty' };
   if (calendar.sealedDays < GRID_MIN_SEALED_DAYS) {
-    const days = calendar.columns
-      .flatMap((column) => column.days)
-      .filter((cell) => cell.state === 'sealed' || cell.state === 'minted');
-    return { mode: 'first-days', days };
+    // From sealedCells, NOT from the windowed columns: a sealed day older than
+    // the window is still part of the record.
+    return { mode: 'first-days', days: calendar.sealedCells };
   }
   return { mode: 'grid', calendar };
 }
