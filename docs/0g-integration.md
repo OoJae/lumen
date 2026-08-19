@@ -176,6 +176,65 @@ network is baked into the artifact. Slower path: set
 `NEXT_PUBLIC_ZG_NETWORK=testnet` and redeploy. If mainnet chain is fine but its
 indexer misbehaves, override `NEXT_PUBLIC_ZG_MAINNET_INDEXER_RPC` and redeploy.
 
+## ERC-7857 conformance — checkable, not asserted
+
+"Agentic ID" is easy to claim and easy to fake by shipping a custom ERC-721 with
+a `dataHash` field. `LumenCompanion` implements the interfaces and advertises
+them through ERC-165, so conformance is a call anyone can make against the live
+mainnet contract:
+
+```bash
+C=0x0FD618664FFAc86ef734C0C46eFF23bD73CBd738
+for id in 0xee5a526e 0xaa18b754 0x01ffc9a7 0x80ac58cd 0xffffffff; do
+  echo -n "$id -> "; cast call $C "supportsInterface(bytes4)(bool)" $id --rpc-url https://evmrpc.0g.ai
+done
+```
+
+| Interface ID | Interface | Live mainnet answer |
+|---|---|---|
+| `0xee5a526e` | `IERC7857` | **true** |
+| `0xaa18b754` | `IERC7857Metadata` | **true** |
+| `0x01ffc9a7` | ERC-165 | **true** |
+| `0x80ac58cd` | ERC-721 | **true** |
+| `0xffffffff` | (must be rejected) | **false** |
+
+`IERC7857` is the full 13-function surface — `iTransfer`, `iClone`, `verifier`,
+`authorizeUsage`, `revokeAuthorization`, `authorizedUsersOf`, `delegateAccess`,
+`getDelegateAccess`, plus the ERC-721 ownership/approval functions — not a
+convenient subset. `contracts/test` asserts this (`reports ERC-165, ERC-721 and
+both ERC-7857 interfaces`), computing the IDs on-chain rather than hardcoding
+them, so a signature change breaks the test instead of silently drifting.
+
+### Where we diverge from the standard, and why
+
+Conformance without honesty is worse than no conformance, so:
+
+- **`iTransfer` and `iClone` revert.** ERC-7857's transfer semantics require
+  re-encrypting the agent's private data to the recipient and proving it through
+  a TEE oracle (`IERC7857DataVerifier`). No such oracle is live on 0G today.
+  Rather than ship a transfer that moves the token while leaving the memory
+  encrypted to the *old* owner's key — which would be a silent data-loss bug
+  dressed as a feature — the contract reverts with `OracleNotLive` /
+  `TransferRequiresOracle`. Companions are soulbound until an oracle exists, and
+  the contract says so rather than pretending.
+- **`verifier()` returns the zero address**, for the same reason, and truthfully.
+- **`anchorMemoryRoot` is ours, not the standard's.** ERC-7857's `update` path
+  replaces the data array with no concurrency control. We keep `update` as the
+  reference-compatible alias, but the path the app uses is compare-and-swap
+  (`expectedPrevRoot`), which is what makes the event log a verifiable chain and
+  stops two devices silently clobbering each other.
+- **One companion per wallet, minted only to `msg.sender`.** A product decision,
+  not a standard requirement.
+- **Zero admin keys.** No owner, no pause, no upgrade path. Nobody — including
+  us — can move your pointer or take your token.
+
+One correction worth recording: the contract's own NatSpec describes anchoring as
+"rollback-protected." It is not. Compare-and-swap prevents a *stale* write racing
+a fresh one; it does not prevent an owner deliberately anchoring back to an older
+root, which is their prerogative anyway. The comment overstates it, the deployed
+bytecode cannot be edited, and pretending otherwise is exactly the failure mode
+this project exists to avoid — so it is corrected here instead.
+
 ## Public addresses & tx hashes
 
 Every hash below was read back from the live chain with `eth_getLogs` against
