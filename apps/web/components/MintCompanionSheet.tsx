@@ -111,7 +111,9 @@ export function MintCompanionSheet({
               <span className="font-mono text-xs text-ink">
                 {receipt ? shortRoot(receipt.rootHash) : '—'}
               </span>
-              .
+              . Anyone can verify that at{' '}
+              <span className="font-mono text-xs">lumen/companion/{memory.wallet?.slice(0, 6)}…</span>{' '}
+              without a wallet — and see nothing you wrote.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {tx.explorerTxUrl && (
@@ -134,6 +136,14 @@ export function MintCompanionSheet({
                   View contract ↗
                 </a>
               )}
+              <a
+                href={`/companion/${memory.wallet}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full border border-border px-3.5 py-1.5 text-xs font-medium text-muted hover:border-accent/40 hover:text-ink"
+              >
+                Public proof ↗
+              </a>
               <button
                 type="button"
                 onClick={onClose}

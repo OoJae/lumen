@@ -162,6 +162,20 @@ export function MemoryStrip({ memory }: { memory: JournalMemory }) {
         onOpenReceipt={save.receipt ? () => setOpen('receipt') : null}
       />
 
+      {/* The share surface. A companion nobody can check is just a claim — this
+          link is the page where a stranger verifies it without a wallet. */}
+      {companion.tokenId !== null && memory.wallet && (
+        <a
+          href={`/companion/${memory.wallet}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="A public page where anyone can verify this companion — no wallet needed. It shows the pointer, never your words."
+          className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
+        >
+          Public proof ↗
+        </a>
+      )}
+
       <CompanionBlock
         memory={memory}
         companion={companion}

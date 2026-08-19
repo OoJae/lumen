@@ -828,6 +828,16 @@ export const LUMEN_COMPANION_ADDRESS: Record<ZgNetworkKey, `0x${string}` | null>
   testnet: '0x0FD618664FFAc86ef734C0C46eFF23bD73CBd738',
 };
 
+/**
+ * The block each deployment landed in. Log queries start here, not at genesis:
+ * 0G mainnet is past block 42M, and scanning from 0 turns a public proof page
+ * into a 17-second wait. Read from contracts/deployments/*.json.
+ */
+export const LUMEN_COMPANION_DEPLOY_BLOCK: Record<ZgNetworkKey, bigint> = {
+  mainnet: 41_801_714n,
+  testnet: 49_747_640n,
+};
+
 /** 0G InferenceServing registry — the on-chain source of a provider's TEE signer
  *  address, which per-request verification checks recovered signatures against. */
 export const INFERENCE_SERVING_ADDRESS =
