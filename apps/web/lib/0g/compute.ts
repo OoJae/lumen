@@ -124,14 +124,12 @@ export async function reflectRawResponse(
 }
 
 /**
- * Demo fallback — a clearly-labeled MOCK. `reason: 'live-unavailable'` marks the
- * case where a real provider was configured but unreachable (e.g. outage), so the
- * attestation note stays honest about why this isn't a live TEE response.
+ * Demo fallback — a clearly-labeled MOCK, reachable ONLY when no Compute
+ * credential is configured (local dev). It is deliberately not a failure
+ * fallback: when a credential is present and the provider is unreachable, the
+ * gateway returns an error rather than inventing a reflection.
  */
-export function reflectDemo(
-  messages: ChatMessage[],
-  opts?: { model?: string; reason?: 'no-key' | 'live-unavailable' },
-): ReflectResult {
+export function reflectDemo(messages: ChatMessage[], opts?: { model?: string }): ReflectResult {
   const model = activeModel(opts?.model);
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const reflection = composeDemoReflection(lastUser);
@@ -146,7 +144,7 @@ export function reflectDemo(
 
   return {
     tokens: tokens(),
-    finalize: () => buildDemoAttestation(model, opts?.reason ?? 'no-key'),
+    finalize: () => buildDemoAttestation(model),
   };
 }
 

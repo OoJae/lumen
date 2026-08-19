@@ -51,12 +51,6 @@ export const ATTESTATION_NOTE_DEMO =
   'locally as a mock. It did NOT run inside a TEE. Configure a 0G Compute token for real ' +
   'Sealed Inference.';
 
-export const ATTESTATION_NOTE_LIVE_UNAVAILABLE =
-  'The live 0G Compute provider (TEE) was unreachable just now, so this is a local demo ' +
-  'reflection — NOT a real TEE response. 0G is a decentralized provider marketplace; ' +
-  'individual providers can be temporarily offline. Real Sealed Inference resumes ' +
-  'automatically once the provider responds.';
-
 /** Pre-verification (or verification unavailable): trust-mode only. */
 export function buildTrustModeNote(disclosure?: ProviderDisclosure, reason?: string): string {
   const tail = reason
@@ -135,10 +129,7 @@ export function buildUnverifiedAttestation(
   };
 }
 
-export function buildDemoAttestation(
-  model: string,
-  reason: 'no-key' | 'live-unavailable' = 'no-key',
-): AttestationInfo {
+export function buildDemoAttestation(model: string): AttestationInfo {
   return {
     verificationStatus: 'demo',
     trustMode: 'unspecified',
@@ -147,7 +138,7 @@ export function buildDemoAttestation(
     model: `${model} (mock)`,
     timestamp: new Date().toISOString(),
     learnMoreUrl: ATTESTATION_DOCS_URL,
-    note: reason === 'live-unavailable' ? ATTESTATION_NOTE_LIVE_UNAVAILABLE : ATTESTATION_NOTE_DEMO,
+    note: ATTESTATION_NOTE_DEMO,
     inferencePath: 'demo',
   };
 }

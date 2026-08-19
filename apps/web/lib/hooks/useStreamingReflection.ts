@@ -33,8 +33,8 @@ const FORMAT_PROVIDER_RAW = 'zg-openai-v1';
  *    byte, then verify the enclave signature over them IN THE BROWSER before the
  *    turn is persisted. This is the Wave 3 headline: a reflection is
  *    cryptographically verified for every user, wallet or not.
- *  - `lumen-v1` — Lumen's own SSE shape, used only by demo/live-unavailable
- *    fallbacks, which carry their own clearly-labelled attestation event.
+ *  - `lumen-v1` — Lumen's own SSE shape, served ONLY when no Compute credential
+ *    is configured (local dev), carrying a clearly-labelled demo attestation.
  */
 export function useStreamingReflection(): UseStreamingReflection {
   const [text, setText] = useState('');
@@ -69,7 +69,13 @@ export function useStreamingReflection(): UseStreamingReflection {
         body: JSON.stringify({ messages }),
         signal: ac.signal,
       });
-      if (!res.ok || !res.body) throw new Error(`Reflection request failed (${res.status})`);
+      if (!res.ok) {
+        // The gateway answers a provider outage with plain-text prose, not a
+        // fabricated reflection. Show what it actually said.
+        const detail = (await res.text().catch(() => '')).trim();
+        throw new Error(detail || `Reflection request failed (${res.status})`);
+      }
+      if (!res.body) throw new Error('The reflection response had no body');
 
       const isRawProvider = res.headers.get(STREAM_FORMAT_HEADER) === FORMAT_PROVIDER_RAW;
       return isRawProvider
@@ -131,7 +137,7 @@ async function consumeProviderStream(
   return { text: accumulated, attestation };
 }
 
-/** Lumen's own SSE shape (demo / live-unavailable). */
+/** Lumen's own SSE shape (local-dev demo only). */
 async function consumeLumenStream(
   res: Response,
   { setText, setAttestation, setStatus, setError }: Setters,

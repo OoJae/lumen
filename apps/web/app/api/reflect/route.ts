@@ -10,8 +10,17 @@
  *
  * Honest threat model: for the duration of the call this gateway still sees
  * plaintext (it holds the Compute credential). It keeps no entries and logs no
- * content, and wallet-connected users bypass it entirely via browser-direct
- * inference. Demo mode keeps Lumen's own SSE shape and is clearly labeled.
+ * content, and because it relays raw bytes the browser can still prove the
+ * enclave signed exactly what it displayed — a gateway that tampered would be
+ * caught by every user. Browser-direct inference (removing the gateway from the
+ * plaintext path entirely) is Wave 4 work and is NOT implemented; nothing here
+ * bypasses this route today.
+ *
+ * There is exactly one mock path and it cannot reach production: with no
+ * Compute credential configured (local dev), the route serves a clearly-labeled
+ * demo stream. When a credential IS configured, a provider failure returns an
+ * honest error — Lumen never fabricates a reflection and lets you believe
+ * something read you.
  */
 import type { NextRequest } from 'next/server';
 import {
@@ -43,8 +52,10 @@ function sse(event: string | null, data: unknown): Uint8Array {
   return encoder.encode(`${event ? `event: ${event}\n` : ''}data: ${payload}\n\n`);
 }
 
-function demoStream(messages: ChatMessage[], reason: 'no-key' | 'live-unavailable'): Response {
-  const result = reflectDemo(messages, { reason });
+/** Local-dev only: no Compute credential configured. Unreachable in production,
+ *  where the credential is always present. */
+function demoStream(messages: ChatMessage[]): Response {
+  const result = reflectDemo(messages);
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
@@ -84,7 +95,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     return new Response('`messages` is required', { status: 400 });
   }
 
-  if (!isComputeLive()) return demoStream(messages, 'no-key');
+  if (!isComputeLive()) return demoStream(messages);
 
   const withSystem = foldSystemMessages(messages, LUMEN_SYSTEM_PROMPT);
 
@@ -92,8 +103,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   try {
     raw = await reflectRawResponse(withSystem);
   } catch {
-    // Provider unreachable/timed out — a labeled mock beats a hung UI.
-    return demoStream(messages, 'live-unavailable');
+    // Deliberately NOT a mock. A journaling app that invents a reflection when
+    // the enclave is unreachable is lying to someone who just wrote something
+    // true. Fail visibly instead; the entry is already safe on the client.
+    return new Response(
+      'The 0G Compute provider could not be reached, so there is no verified reflection to show. Your entry is saved locally — try again in a moment.',
+      { status: 502, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 
   // Pipe the provider's body through untouched. no-transform is load-bearing:
