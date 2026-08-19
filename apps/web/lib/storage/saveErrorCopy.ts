@@ -15,8 +15,10 @@ export interface FundingRemedy {
   address?: string;
 }
 
-/** Measured on 0G mainnet: a small snapshot save is gas-dominated, ~0.001 0G. */
-const TYPICAL_SAVE_COST = '0.001';
+/** MEASURED on 0G mainnet (2026-08-19): two real saves cost 0.00118 and 0.00124
+ *  0G. A small snapshot is gas-dominated — the storage fee itself is a rounding
+ *  error next to the flow-contract transaction. */
+const TYPICAL_SAVE_COST = '0.0012';
 
 export interface RemedyOptions {
   /** Typical cost of THIS action, e.g. '0.0003'. Defaults to a storage save. */

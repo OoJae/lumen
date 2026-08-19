@@ -48,6 +48,17 @@ import type { JournalMemory } from './useJournalMemory';
 // Literal member expression — Next only inlines NEXT_PUBLIC_* it can see statically.
 const ADDRESS_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_ADDRESS;
 
+/**
+ * Price companion writes with LEGACY gas, the way 0G's own storage SDK does.
+ *
+ * 0G's base fee is ~7 wei and effectively the whole cost is the node's flat
+ * 4 gwei tip suggestion. EIP-1559 estimation reads that near-zero base fee and
+ * underprices the transaction, which is why the first real anchor sat until it
+ * was manually bumped. Legacy pricing takes eth_gasPrice (the 4 gwei the node
+ * actually wants), so the wallet shows a "site suggested" fee that confirms.
+ */
+const ZG_FEE = { type: 'legacy' } as const;
+
 export type CompanionTxPhase =
   | 'idle'
   | 'signing'
@@ -350,6 +361,7 @@ export function useCompanion(memory: JournalMemory): Companion {
         args: [root, COMPANION_DATA_DESCRIPTION],
         // Makes wagmi raise ChainMismatchError rather than broadcast anywhere else.
         chainId: net.chainId,
+        ...ZG_FEE,
       }),
     );
   }, [contract, memory.save.receipt, companionOf, connected, fail, send, writeContractAsync, net.chainId]);
@@ -391,6 +403,7 @@ export function useCompanion(memory: JournalMemory): Companion {
         functionName: 'anchorMemoryRoot',
         args: [tokenId as bigint, newRoot, expectedPrev],
         chainId: net.chainId,
+        ...ZG_FEE,
       }),
     );
   }, [

@@ -149,12 +149,22 @@ export function buildDataDescription(meta: object): string {
 
 export const COMPANION_DATA_DESCRIPTION = buildDataDescription(COMPANION_METADATA);
 
-// ── Costs (placeholders until measured on a real mint/anchor) ─────────────────
+// ── Costs ─────────────────────────────────────────────────────────────────────
 
-/** Measured on 0G mainnet; copy always pairs these with "your wallet shows the
- *  exact amount before you sign". */
-export const TYPICAL_MINT_COST = '0.0003';
-export const TYPICAL_ANCHOR_COST = '0.0002';
+/**
+ * MEASURED on 0G mainnet (2026-08-19), not estimated:
+ *   mint   648,192 gas → 0.0025 0G   anchor 60,729 gas → 0.00024 0G
+ *
+ * Mint costs ~10x an anchor because it writes COMPANION_DATA_DESCRIPTION into
+ * contract storage — every 32 bytes of that public label is a fresh SSTORE the
+ * minter pays for. That is the price of the token carrying its own honest
+ * description instead of a link that can rot.
+ *
+ * Copy always pairs these with "your wallet shows the exact amount before you
+ * sign", because they are typical values and not a quote.
+ */
+export const TYPICAL_MINT_COST = '0.0025';
+export const TYPICAL_ANCHOR_COST = '0.00024';
 
 // ── Failure → honest copy ─────────────────────────────────────────────────────
 
