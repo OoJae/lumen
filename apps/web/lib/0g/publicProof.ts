@@ -11,6 +11,7 @@
  * server component. The one call we need from the indexer is a plain JSON-RPC
  * method, so we make it directly.
  */
+import { unstable_cache } from 'next/cache';
 import { createPublicClient, http, type Address } from 'viem';
 import {
   LUMEN_COMPANION_ABI,
@@ -30,6 +31,9 @@ import {
 /** A slow RPC must not hang the page — a partial proof beats a spinner. */
 const RPC_TIMEOUT_MS = 12_000;
 const INDEXER_TIMEOUT_MS = 6_000;
+
+/** Must stay in step with the page's "no more than N seconds ago" copy. */
+export const PROOF_TTL_SECONDS = 30;
 
 export type StorageProbe =
   | { status: 'available'; replicas: number }
@@ -63,7 +67,14 @@ function client() {
 
 /** Is this a syntactically valid EVM address? Checked before any RPC work. */
 export function parseAddress(raw: string): Address | null {
-  const value = decodeURIComponent(raw ?? '').trim();
+  let value: string;
+  try {
+    value = decodeURIComponent(raw ?? '').trim();
+  } catch {
+    // decodeURIComponent throws URIError on a malformed escape (a lone '%').
+    // A junk URL must render "that isn't a wallet address", never a 500.
+    return null;
+  }
   return /^0x[0-9a-fA-F]{40}$/.test(value) ? (value as Address) : null;
 }
 
@@ -87,7 +98,6 @@ export async function probeStorage(rootHash: string | null): Promise<StorageProb
         params: [rootHash],
       }),
       signal: AbortSignal.timeout(INDEXER_TIMEOUT_MS),
-      cache: 'no-store',
     });
     if (!res.ok) return { status: 'unchecked', reason: `Indexer returned ${res.status}.` };
     const body = (await res.json()) as { result?: unknown[] | null };
@@ -100,8 +110,24 @@ export async function probeStorage(rootHash: string | null): Promise<StorageProb
   }
 }
 
-/** Gather everything a stranger needs to verify one companion. */
-export async function loadCompanionProof(address: Address): Promise<CompanionProof> {
+/**
+ * Gather everything a stranger needs to verify one companion.
+ *
+ * Cached for PROOF_TTL_SECONDS via unstable_cache rather than route-level ISR:
+ * Next 15 does not cache `fetch` by default, and viem's transport is fetch, so
+ * the route would re-read the chain on every single hit — about four seconds
+ * each time, for a page whose whole job is to be clicked by strangers. Caching
+ * the reduced result keeps the shared-link case instant while the page's own
+ * copy stays true ("no more than 30 seconds ago").
+ */
+export const loadCompanionProof = (address: Address): Promise<CompanionProof> =>
+  unstable_cache(
+    () => readCompanionProof(address),
+    ['lumen-companion-proof', address.toLowerCase()],
+    { revalidate: PROOF_TTL_SECONDS },
+  )();
+
+async function readCompanionProof(address: Address): Promise<CompanionProof> {
   const net = activeNetwork();
   const contractAddress = resolveCompanionAddress(net.key);
   const base = {

@@ -14,12 +14,20 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { shortRoot, utcDay } from '@/lib/0g/anchorHistory';
-import { loadCompanionProof, parseAddress, type CompanionProof } from '@/lib/0g/publicProof';
+import {
+  loadCompanionProof,
+  parseAddress,
+  PROOF_TTL_SECONDS,
+  type CompanionProof,
+} from '@/lib/0g/publicProof';
 
 export const runtime = 'nodejs';
 // Re-read the chain at most twice a minute. Long enough that the second visitor
 // to a shared proof link gets it instantly, short enough that the page is still
 // showing the chain rather than a snapshot of our opinion of it.
+// Must be a literal — Next requires segment config to be statically analysable,
+// so this cannot read PROOF_TTL_SECONDS. Keep the two in step; the page copy and
+// the unstable_cache TTL both come from the constant.
 export const revalidate = 30;
 
 export async function generateMetadata({
@@ -218,7 +226,7 @@ export default async function CompanionProofPage({
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           Everything below was read straight from {proof.networkLabel} (chain {proof.chainId}),
-          no more than 30 seconds ago. You need no wallet, no account and no trust in Lumen to
+          no more than {PROOF_TTL_SECONDS} seconds ago. You need no wallet, no account and no trust in Lumen to
           check it — and it reveals nothing about what the owner wrote.
         </p>
       </header>
