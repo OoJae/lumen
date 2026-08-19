@@ -37,10 +37,10 @@ coverage/
 /Lumen-Wave1-Submission.md
 
 # internal docs (kept local, not public-facing)
+# NOTE: architecture.md, 0g-integration.md and privacy-model.md are deliberately
+# PUBLIC — they are the honest threat model and the integration record, and a
+# claim nobody can read is not a claim. Only planning material stays local.
 /CLAUDE.md
-/docs/0g-integration.md
-/docs/architecture.md
-/docs/privacy-model.md
 /docs/wave-submissions/
 tsconfig.tsbuildinfo
 
