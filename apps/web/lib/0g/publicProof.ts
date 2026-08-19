@@ -21,12 +21,8 @@ import {
 
 import { activeChain } from './chain';
 import { activeNetwork } from './network';
-import {
-  buildAnchorChain,
-  type AnchorChain,
-  type RawAnchorEvent,
-  type RawMintEvent,
-} from './anchorHistory';
+import { buildAnchorChain, type AnchorChain } from './anchorHistory';
+import { readAnchorLogs } from './anchorLogs';
 
 /** A slow RPC must not hang the page — a partial proof beats a spinner. */
 const RPC_TIMEOUT_MS = 12_000;
@@ -181,11 +177,13 @@ async function readCompanionProof(address: Address): Promise<CompanionProof> {
   const owner = ownerResult.status === 'fulfilled' ? (ownerResult.value as Address) : null;
 
   // Scan from the deploy block, never genesis — see LUMEN_COMPANION_DEPLOY_BLOCK.
-  const fromBlock = LUMEN_COMPANION_DEPLOY_BLOCK[net.key];
-  const [mint, anchors] = await Promise.all([
-    fetchMint(publicClient, contractAddress, tokenId, fromBlock),
-    fetchAnchors(publicClient, contractAddress, tokenId, fromBlock),
-  ]);
+  // Same reader the in-app archive uses, so the two can never disagree.
+  const { mint, anchors } = await readAnchorLogs(
+    publicClient,
+    contractAddress,
+    tokenId,
+    LUMEN_COMPANION_DEPLOY_BLOCK[net.key],
+  );
 
   const chain = buildAnchorChain(mint, anchors);
   const storage = await probeStorage(latestRoot);
@@ -207,82 +205,3 @@ function sameHex(a: string | null, b: string | null): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
-type Client = ReturnType<typeof client>;
-
-async function blockTime(publicClient: Client, blockNumber: bigint): Promise<number> {
-  try {
-    const block = await publicClient.getBlock({ blockNumber });
-    return Number(block.timestamp);
-  } catch {
-    return 0;
-  }
-}
-
-async function fetchMint(
-  publicClient: Client,
-  address: Address,
-  tokenId: bigint,
-  fromBlock: bigint,
-): Promise<RawMintEvent | null> {
-  try {
-    const logs = await publicClient.getContractEvents({
-      address,
-      abi: LUMEN_COMPANION_ABI,
-      eventName: 'Minted',
-      args: { tokenId },
-      fromBlock,
-      toBlock: 'latest',
-    });
-    const log = logs[0];
-    if (!log) return null;
-    const args = log.args as { owner?: Address; memoryRoot?: string };
-    return {
-      tokenId: tokenId.toString(),
-      owner: args.owner ?? '0x',
-      memoryRoot: args.memoryRoot ?? '',
-      txHash: log.transactionHash ?? '',
-      blockNumber: Number(log.blockNumber ?? 0n),
-      timestamp: await blockTime(publicClient, log.blockNumber ?? 0n),
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function fetchAnchors(
-  publicClient: Client,
-  address: Address,
-  tokenId: bigint,
-  fromBlock: bigint,
-): Promise<RawAnchorEvent[]> {
-  try {
-    const logs = await publicClient.getContractEvents({
-      address,
-      abi: LUMEN_COMPANION_ABI,
-      eventName: 'MemoryRootAnchored',
-      args: { tokenId },
-      fromBlock,
-      toBlock: 'latest',
-    });
-    // Block timestamps in parallel: one round-trip per distinct block, not per log.
-    const times = new Map<bigint, number>();
-    await Promise.all(
-      [...new Set(logs.map((l) => l.blockNumber ?? 0n))].map(async (bn) => {
-        times.set(bn, await blockTime(publicClient, bn));
-      }),
-    );
-    return logs.map((log) => {
-      const args = log.args as { seq?: bigint; prevRoot?: string; newRoot?: string };
-      return {
-        seq: Number(args.seq ?? 0n),
-        prevRoot: args.prevRoot ?? '',
-        newRoot: args.newRoot ?? '',
-        txHash: log.transactionHash ?? '',
-        blockNumber: Number(log.blockNumber ?? 0n),
-        timestamp: times.get(log.blockNumber ?? 0n) ?? 0,
-      };
-    });
-  } catch {
-    return [];
-  }
-}

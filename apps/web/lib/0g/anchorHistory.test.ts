@@ -104,11 +104,12 @@ describe('buildAnchorChain', () => {
     expect(chain.latestRoot).toBe(R2);
   });
 
-  it('handles a mint with no anchors yet', () => {
+  it('handles a mint with no anchors yet — the mint day still counts', () => {
     const chain = buildAnchorChain(mint(R1), []);
     expect(chain.intact).toBe(true);
     expect(chain.latestRoot).toBe(R1);
-    expect(chain.practiceDays).toEqual([]);
+    expect(chain.mintDay).toBe(utcDay(1_755_608_747));
+    expect(chain.practiceDays).toEqual([utcDay(1_755_608_747)]);
   });
 
   it('handles a companion minted before its first save (zero root)', () => {
@@ -136,6 +137,52 @@ describe('practice days', () => {
       anchor(3, R2, R3, day1Later),
     ]);
     expect(chain.practiceDays).toEqual(['2026-08-16', '2026-08-19']);
+  });
+
+  it('counts the mint day, sorted to the front', () => {
+    const day0 = Date.UTC(2026, 7, 14, 9, 0) / 1000;
+    const day1 = Date.UTC(2026, 7, 19, 13, 10) / 1000;
+    const chain = buildAnchorChain(mint(R1, day0), [anchor(1, R1, R2, day1)]);
+    expect(chain.mintDay).toBe('2026-08-14');
+    expect(chain.practiceDays).toEqual(['2026-08-14', '2026-08-19']);
+  });
+
+  it('does not count a zero-root mint — it committed to nothing', () => {
+    const day1 = Date.UTC(2026, 7, 19, 13, 10) / 1000;
+    const chain = buildAnchorChain(mint(ZERO), [anchor(1, ZERO, R1, day1)]);
+    expect(chain.mintDay).toBeNull();
+    expect(chain.practiceDays).toEqual(['2026-08-19']);
+  });
+
+  it('collapses a mint and a same-day anchor into one day', () => {
+    const morning = Date.UTC(2026, 7, 19, 9, 0) / 1000;
+    const evening = Date.UTC(2026, 7, 19, 21, 0) / 1000;
+    const chain = buildAnchorChain(mint(R1, morning), [anchor(1, R1, R2, evening)]);
+    expect(chain.practiceDays).toEqual(['2026-08-19']);
+  });
+
+  it('excludes a mint whose block timestamp could not be read', () => {
+    // blockTime() returns 0 on failure rather than inventing a time; utcDay(0)
+    // is '1970-01-01', which must never reach the record.
+    const chain = buildAnchorChain(mint(R1, 0), [anchor(1, R1, R2, Date.UTC(2026, 7, 19) / 1000)]);
+    expect(chain.mintDay).toBeNull();
+    expect(chain.practiceDays).toEqual(['2026-08-19']);
+    expect(chain.practiceDays).not.toContain('1970-01-01');
+  });
+
+  it('excludes an anchor whose block timestamp could not be read', () => {
+    const chain = buildAnchorChain(mint(ZERO), [
+      anchor(1, ZERO, R1, 0),
+      anchor(2, R1, R2, Date.UTC(2026, 7, 19) / 1000),
+    ]);
+    expect(chain.practiceDays).toEqual(['2026-08-19']);
+    expect(chain.practiceDays).not.toContain('1970-01-01');
+  });
+
+  it('has no mint day when the mint event is out of range', () => {
+    const chain = buildAnchorChain(null, [anchor(1, R1, R2, Date.UTC(2026, 7, 19) / 1000)]);
+    expect(chain.mintDay).toBeNull();
+    expect(chain.practiceDays).toEqual(['2026-08-19']);
   });
 
   it('bins by UTC so the same history reads the same in every timezone', () => {

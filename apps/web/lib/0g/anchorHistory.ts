@@ -51,8 +51,19 @@ export interface AnchorChain {
   brokenAtSeq: number | null;
   /** The root the chain ends on — what `latestMemoryRoot` should return. */
   latestRoot: string | null;
-  /** Distinct UTC days on which the owner anchored, oldest first. */
+  /**
+   * Distinct UTC days on which the owner committed a root, oldest first.
+   *
+   * Includes the mint day: minting writes a root into the very slot that
+   * `anchorMemoryRoot` later compare-and-swaps against, and `buildAnchorChain`
+   * already treats it as link 0. It is a signed transaction, in a block, by the
+   * owner, committing to a specific encrypted snapshot — every property this
+   * record claims. Excluding it would show nothing at all for someone who just
+   * minted, directly below a chain view rendering their mint with a timestamp.
+   */
   practiceDays: string[];
+  /** The UTC day the token was minted, or null if it sealed no real root. */
+  mintDay: string | null;
 }
 
 const ZERO = '0x0000000000000000000000000000000000000000000000000000000000000000';
@@ -109,7 +120,19 @@ export function buildAnchorChain(
     return { ...event, linked, expectedPrev };
   });
 
-  const practiceDays = [...new Set(ordered.map((e) => utcDay(e.timestamp)))].sort();
+  // A zero-root mint committed to nothing, so it is not a sealed day. And a
+  // timestamp of 0 means the block read FAILED (blockTime returns 0 rather than
+  // inventing a time) — counting it would put a '1970-01-01' day in the record
+  // and, once this feeds a calendar, drag the window back fifty-six years.
+  const mintDay =
+    mint && mint.timestamp > 0 && !isZeroRoot(mint.memoryRoot) ? utcDay(mint.timestamp) : null;
+
+  const practiceDays = [
+    ...new Set([
+      ...(mintDay ? [mintDay] : []),
+      ...ordered.filter((event) => event.timestamp > 0).map((event) => utcDay(event.timestamp)),
+    ]),
+  ].sort();
 
   return {
     mint,
@@ -118,6 +141,7 @@ export function buildAnchorChain(
     brokenAtSeq,
     latestRoot: links.length > 0 ? links[links.length - 1]!.newRoot : (mint?.memoryRoot ?? null),
     practiceDays,
+    mintDay,
   };
 }
 

@@ -14,6 +14,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { shortRoot, utcDay } from '@/lib/0g/anchorHistory';
+import { buildPracticeCalendar, seqsByDay, todayUtc } from '@/lib/0g/practice';
+import { PracticeGrid } from '@/components/PracticeGrid';
 import {
   loadCompanionProof,
   parseAddress,
@@ -214,6 +216,16 @@ export default async function CompanionProofPage({
 
   const proof = await loadCompanionProof(address);
   const hasCompanion = proof.tokenId !== null;
+  // `mintDay` is optional on purpose: unstable_cache keys don't change when the
+  // return shape does, so for up to PROOF_TTL_SECONDS after a deploy a cached
+  // chain predates the field.
+  const calendar = buildPracticeCalendar({
+    practiceDays: proof.chain.practiceDays,
+    mintDay: proof.chain.mintDay ?? null,
+    seqsByDay: seqsByDay(proof.chain),
+    today: todayUtc(),
+    maxWeeks: 26,
+  });
 
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-5 py-12 sm:py-16">
@@ -311,20 +323,25 @@ export default async function CompanionProofPage({
             )}
           </p>
 
-          {proof.chain.practiceDays.length > 0 && (
-            <>
-              <Heading sub="Days on which this owner signed an anchor. Not a streak and not a score — just a record that can't be back-dated, because each entry is a transaction in a block.">
-                Proof of practice
-              </Heading>
-              <Card>
-                <Row label="Days anchored">{proof.chain.practiceDays.length}</Row>
-                <Row label="First">{proof.chain.practiceDays[0]}</Row>
-                <Row label="Most recent">
-                  {proof.chain.practiceDays[proof.chain.practiceDays.length - 1]}
-                </Row>
-              </Card>
-            </>
+          <Heading sub="A day is sealed when this wallet signed a transaction committing to an encrypted snapshot. The mint counts — it commits a root too.">
+            Proof of practice
+          </Heading>
+          <div className="rounded-2xl border border-border bg-surface px-5 py-5 shadow-sm">
+            <PracticeGrid calendar={calendar} />
+          </div>
+          {calendar.sealedDays > 0 && (
+            <Card>
+              <Row label="Days sealed">{calendar.sealedDays}</Row>
+              <Row label="First">{calendar.firstDay}</Row>
+              <Row label="Most recent">{calendar.lastDay}</Row>
+            </Card>
           )}
+          <p className="mt-3 text-xs leading-relaxed text-muted">
+            Each amber day is a transaction this wallet signed, in a block, at a time the network
+            agreed on — nobody can back-date one or insert one later. It does not show days the
+            owner <em>wrote</em>, only days they chose to commit a snapshot. Blank is not absence of
+            writing.
+          </p>
 
           <Heading sub="The chain stores a pointer. This is the thing it points at.">
             The encrypted snapshot
