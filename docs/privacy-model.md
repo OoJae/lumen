@@ -109,16 +109,46 @@ what it exposes:
    own AAD binding) everywhere at rest.
 4. **Local IndexedDB.** Content is ciphertext-only. The plaintext metadata it
    does hold, exhaustively: turn ids, turn timestamps, vector-presence, the
-   storage pointer `{seq, rootHash, txHash}` (already public on-chain), and the
-   KCV envelope (itself ciphertext). This enables the pre-unlock "N encrypted
-   entries" UX without weakening "no plaintext at rest."
-5. **Model-weight download.** First recall use fetches ~23 MB of MiniLM weights
+   storage pointer `{seq, rootHash, txHash}` (already public on-chain), the
+   KCV envelope (itself ciphertext), and — for entries you delete — a
+   **deletion marker** holding that entry's id and the time you deleted it.
+   This enables the pre-unlock "N encrypted entries" UX without weakening "no
+   plaintext at rest."
+
+   The marker is plaintext for two reasons. It has to be written in the *same*
+   IndexedDB transaction that removes the turn and its vector (awaiting
+   `crypto.subtle` inside a transaction lets the transaction auto-commit), and
+   it leaks strictly less than what was there a moment earlier: the store
+   already held that id and timestamp as plaintext keys alongside the
+   ciphertext. After the delete it holds the id and a timestamp, and nothing
+   else.
+
+5. **Deletion is local and forward-looking, never retroactive.** Deleting an
+   entry removes its ciphertext and its vector from this device and keeps them
+   out of every snapshot you save afterwards. Deletion markers travel inside
+   those later snapshots, which is how a deletion reaches your other devices
+   and how restoring an older root cannot resurrect it.
+
+   What deletion **cannot** do, and no mechanism could: unpublish a snapshot
+   already uploaded to 0G. Those bytes remain retrievable by anyone holding the
+   root hash, and remain decryptable only by your wallet's key. If that root is
+   also anchored to your companion, the root itself stays in a public,
+   permanent anchor history. Save (and re-anchor) after deleting and your newest
+   snapshot will not contain the entry; the older one still will. Markers are
+   never pruned, so they accumulate — roughly 60 bytes each — inside your own
+   ciphertext.
+
+   One narrower caveat: an IndexedDB `delete` frees a record; it does not
+   guarantee the underlying disk blocks are overwritten. That is below what a
+   web application can control, and it is why the delete dialog says "removed
+   from this device" and never "erased."
+6. **Model-weight download.** First recall use fetches ~23 MB of MiniLM weights
    from the Hugging Face CDN (then browser-cached). The CDN learns an IP loaded
    Lumen's embedding model; no content is ever sent anywhere.
-6. **Recovery key.** What it is (raw key material), what it grants (full read
+7. **Recovery key.** What it is (raw key material), what it grants (full read
    access), that we never see or store it — plus the determinism assumption and
    KCV behavior above, in writing.
-7. **Minting is a public, permanent statement (W3).** The mint transaction puts
+8. **Minting is a public, permanent statement (W3).** The mint transaction puts
    on a public chain: your address, the block time, one 32-byte root hash, and
    the token's label — a fixed `data:application/json` string that is
    byte-for-byte identical for every Lumen companion, containing no address, no
