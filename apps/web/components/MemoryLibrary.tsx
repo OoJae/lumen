@@ -151,6 +151,7 @@ export function MemoryLibrary({
   const [query, setQuery] = useState('');
   const [queryVector, setQueryVector] = useState<number[] | null>(null);
   const [embedding, setEmbedding] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const runId = useRef(0);
 
@@ -224,6 +225,37 @@ export function MemoryLibrary({
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const resurfaced = useMemo(() => resurface(turns, today), [turns, today]);
+
+  /**
+   * Build and hand over the file.
+   *
+   * Wrapped because an unguarded throw in an onClick makes the button do
+   * nothing at all, with no message — the user cannot tell a broken export from
+   * a browser that blocked the download. Anything that reaches here is a bug,
+   * so say so rather than failing silently.
+   */
+  function exportAs(format: 'markdown' | 'json') {
+    setExportError(null);
+    try {
+      const bundle = buildExportBundle({
+        turns,
+        wallet: memory.wallet,
+        receipt: memory.save.receipt,
+        exportedAt: new Date().toISOString(),
+      });
+      if (format === 'markdown') {
+        download(bundle.markdownFilename, bundle.markdown, 'text/markdown');
+      } else {
+        download(bundle.jsonFilename, bundle.json, 'application/json');
+      }
+    } catch (err) {
+      setExportError(
+        `Couldn't build the export — nothing was downloaded. ${
+          err instanceof Error ? err.message : 'Unknown error'
+        }`,
+      );
+    }
+  }
 
   const embedded = turns.filter((t) => t.embedding).length;
   const searching = Boolean(results);
@@ -329,15 +361,7 @@ export function MemoryLibrary({
             <span className="mr-1 text-[11px] uppercase tracking-wide text-muted">Take it with you</span>
             <button
               type="button"
-              onClick={() => {
-                const bundle = buildExportBundle({
-                  turns,
-                  wallet: memory.wallet,
-                  receipt: memory.save.receipt,
-                  exportedAt: new Date().toISOString(),
-                });
-                download(bundle.markdownFilename, bundle.markdown, 'text/markdown');
-              }}
+              onClick={() => exportAs('markdown')}
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
             >
               <DownloadIcon width={13} height={13} />
@@ -345,20 +369,13 @@ export function MemoryLibrary({
             </button>
             <button
               type="button"
-              onClick={() => {
-                const bundle = buildExportBundle({
-                  turns,
-                  wallet: memory.wallet,
-                  receipt: memory.save.receipt,
-                  exportedAt: new Date().toISOString(),
-                });
-                download(bundle.jsonFilename, bundle.json, 'application/json');
-              }}
+              onClick={() => exportAs('json')}
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
             >
               <DownloadIcon width={13} height={13} />
               JSON
             </button>
+            {exportError && <span className="w-full text-xs text-caution">{exportError}</span>}
             <span className="w-full text-[11px] leading-relaxed text-muted">
               Everything, unencrypted, in formats that outlive Lumen. The JSON keeps each
               reflection&apos;s enclave proof so it can be re-verified later. Store the file the way

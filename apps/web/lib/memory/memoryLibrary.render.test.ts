@@ -134,3 +134,17 @@ describe('MemoryLibrary renders', () => {
     expect(render()).not.toContain('Delete the entry from');
   });
 });
+
+describe('export failures are visible, not silent', () => {
+  it('renders no error banner when nothing has failed', () => {
+    expect(render()).not.toContain("Couldn't build the export");
+  });
+
+  it('survives an entry whose vector contains a non-finite number', () => {
+    // canonicalJson throws on non-finite numbers. Stripping embeddings removes
+    // the likeliest source, but the handler must never be the thing that fails
+    // silently — an unguarded throw in onClick downloads nothing and says nothing.
+    const poisoned = { ...turn('bad', 'entry', daysAgo(1)), embedding: [Number.NaN, 1, 2] };
+    expect(() => render([poisoned])).not.toThrow();
+  });
+});

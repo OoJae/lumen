@@ -175,3 +175,21 @@ describe('the timestamp budget keeps the NEWEST blocks', () => {
     ]);
   });
 });
+
+describe('a cap of zero means zero, not everything', () => {
+  it('does not read any block timestamp', async () => {
+    // slice(-0) is slice(0) — the whole array — so a naive negative slice would
+    // have turned "look up nothing" into "look up everything".
+    const asked: bigint[] = [];
+    const anchored = [anchorLog(1, R1, R2, 500n), anchorLog(2, R2, R1, 900n)];
+    const logs = await readAnchorLogs(
+      reader({ anchored, blocks: { '500': 1_000, '900': 2_000 }, onGetBlock: (bn) => asked.push(bn) }),
+      ADDRESS,
+      2n,
+      FROM,
+      { maxTimestampLookups: 0 },
+    );
+    expect(asked).toEqual([]);
+    expect(logs.anchors.every((a) => a.timestamp === 0)).toBe(true);
+  });
+});

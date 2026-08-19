@@ -58,7 +58,9 @@ async function blockTimes(
   // undated — and undated days are dropped from the practice record. For a
   // prolific anchorer that silently erased their most recent activity, which is
   // exactly the part anyone looking at the page cares about. Keep the tail.
-  const budgeted = distinct.slice(-Math.max(0, max));
+  // `slice(-0)` is `slice(0)` — the whole array — so a cap of 0 would fetch
+  // EVERY block instead of none. Handle it explicitly.
+  const budgeted = max <= 0 ? [] : distinct.slice(-max);
   const times = new Map<bigint, number>();
   await Promise.all(
     budgeted.map(async (bn) => {
