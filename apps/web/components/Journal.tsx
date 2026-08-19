@@ -8,6 +8,8 @@ import { JournalComposer } from './JournalComposer';
 import { MemoryStrip } from './MemoryStrip';
 import { ReflectionCard } from './ReflectionCard';
 import { AttestationViewer } from './AttestationViewer';
+import { MemoryLibrary } from './MemoryLibrary';
+import { BookIcon } from './icons';
 import { ChainGuardBanner } from './ChainGuardBanner';
 import { LockIcon, SparkIcon } from './icons';
 import { activeNetwork } from '@/lib/0g/network';
@@ -32,6 +34,11 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [viewer, setViewer] = useState<AttestationInfo | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  // Which earlier entries the companion drew on, per reflection. Session-only
+  // and deliberately NOT persisted: putting provenance on JournalTurn would
+  // change the on-disk format, and this is worth showing, not storing.
+  const [recalledBy, setRecalledBy] = useState<Record<string, JournalTurn[]>>({});
   const { text, attestation, status, error, reflect, reset } = useStreamingReflection();
 
   const prompt = useMemo(() => promptOfTheDay(), []);
@@ -62,7 +69,8 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
       const recalled = await recallRelevant(entry, turns);
       const result = await reflect(buildContextWithRecall(turns, recalled, entry, prompt));
       if (result && result.text) {
-        const turn: JournalTurn = {
+        const turnRecall = recalled;
+      const turn: JournalTurn = {
           id: newTurnId(),
           entry,
           reflection: result.text,
@@ -70,6 +78,9 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
           createdAt: new Date().toISOString(),
         };
         memory.addTurn(turn);
+      if (turnRecall.length > 0) {
+        setRecalledBy((prev) => ({ ...prev, [turn.id]: turnRecall }));
+      }
         setActiveEntry(null);
         reset();
       }
@@ -99,6 +110,17 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
 
         <MemoryStrip memory={memory} />
 
+        {memory.keyState === 'unlocked' && turns.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setLibraryOpen(true)}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
+          >
+            <BookIcon width={13} height={13} />
+            Search your journal
+          </button>
+        )}
+
         {activeEntry && (
           <div className="mt-8">
             <ReflectionCard
@@ -124,6 +146,7 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
                 entry={turn.entry}
                 reflection={turn.reflection}
                 attestation={turn.attestation}
+                recalled={recalledBy[turn.id]}
                 onOpenAttestation={(a) => setViewer(a)}
               />
             ))}
@@ -134,6 +157,8 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
       </main>
 
       {viewer && <AttestationViewer attestation={viewer} onClose={() => setViewer(null)} />}
+
+      {libraryOpen && <MemoryLibrary memory={memory} onClose={() => setLibraryOpen(false)} />}
 
       <SiteFooter />
     </div>

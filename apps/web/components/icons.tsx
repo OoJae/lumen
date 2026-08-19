@@ -106,3 +106,49 @@ export function CloudCheckIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function SearchIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <circle cx="10.8" cy="10.8" r="6.3" />
+      <path d="m15.5 15.5 4 4" />
+    </svg>
+  );
+}
+
+export function BookIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <path d="M5 4.6h9.2a2.8 2.8 0 0 1 2.8 2.8v12H7.8A2.8 2.8 0 0 1 5 16.6z" />
+      <path d="M19 6.2v13.2H7.8" />
+    </svg>
+  );
+}
+
+export function CalendarIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <rect x="3.8" y="5.4" width="16.4" height="14.2" rx="2.4" />
+      <path d="M3.8 10h16.4M8.4 3.6v3.4M15.6 3.6v3.4" />
+    </svg>
+  );
+}
+
+export function TrashIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <path d="M4.8 6.8h14.4M9.4 6.8V5.2a1.4 1.4 0 0 1 1.4-1.4h2.4a1.4 1.4 0 0 1 1.4 1.4v1.6" />
+      <path d="M6.6 6.8 7.5 19a1.6 1.6 0 0 0 1.6 1.5h5.8a1.6 1.6 0 0 0 1.6-1.5l.9-12.2" />
+    </svg>
+  );
+}
+
+export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props} aria-hidden>
+      <path d="M12 4v10.4" />
+      <path d="m7.8 10.4 4.2 4.2 4.2-4.2" />
+      <path d="M5 18.6h14" />
+    </svg>
+  );
+}
