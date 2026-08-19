@@ -59,6 +59,32 @@ export function isInsufficientFunds(err: unknown): boolean {
 }
 
 /**
+ * An underfunded wallet does NOT always say so. 0G's flow contract reverts
+ * during gas estimation with `CALL_EXCEPTION` and no revert data, which reads
+ * as an opaque SDK dump rather than "you have no 0G" — so recognise the shape
+ * and let the caller re-check the balance before deciding what to tell the user.
+ */
+export function isUnexplainedEstimateFailure(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    code === 'CALL_EXCEPTION' ||
+    (message.includes('missing revert data') && message.includes('estimategas'))
+  );
+}
+
+/** Native balance of the signing wallet, or null if it can't be read. */
+async function signerBalance(signer: Signer): Promise<bigint | null> {
+  try {
+    const address = await signer.getAddress();
+    const balance = await signer.provider?.getBalance(address);
+    return balance ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Verify the WALLET's own chain — never React state, which can be stale.
  *
  * Useful side effect: ethers caches the first getNetwork() result and thereafter
@@ -97,6 +123,15 @@ export async function uploadBlob(signer: Signer, bytes: Uint8Array): Promise<Upl
   // own signer, passes through here.
   await assertSignerChain(signer, net.chainId);
 
+  // Pre-flight: an empty wallet cannot pay the storage fee OR the gas, and the
+  // failure it produces downstream is unreadable. Check first and say so plainly.
+  const balanceBefore = await signerBalance(signer);
+  if (balanceBefore === 0n) {
+    throw new InsufficientFundsError(
+      `Your wallet needs a little ${net.nativeCurrency.symbol} to cover the 0G storage fee.`,
+    );
+  }
+
   const file = new MemData(bytes);
   const indexer = new Indexer(indexerRpc());
   const [result, err] = await indexer.upload(file, net.rpcUrl, signer);
@@ -104,6 +139,21 @@ export async function uploadBlob(signer: Signer, bytes: Uint8Array): Promise<Upl
     if (isInsufficientFunds(err)) {
       throw new InsufficientFundsError(
         `Your wallet needs a little ${net.nativeCurrency.symbol} to cover the 0G storage fee.`,
+      );
+    }
+    if (isUnexplainedEstimateFailure(err)) {
+      // Re-read rather than guess: a bare CALL_EXCEPTION usually means the fee
+      // plus gas exceeds the balance, but it can also be a real contract
+      // rejection, and those deserve different sentences.
+      const balance = await signerBalance(signer);
+      if (balance !== null && balance < 2_000_000_000_000_000n /* 0.002 */) {
+        throw new InsufficientFundsError(
+          `Your wallet needs a little ${net.nativeCurrency.symbol} to cover the 0G storage fee.`,
+        );
+      }
+      throw new Error(
+        "0G's storage contract rejected this upload before it was sent, without saying why. " +
+          'Nothing was spent. This is usually a temporary network-side problem — try again shortly.',
       );
     }
     throw new Error(`0G upload failed: ${err.message}`);
