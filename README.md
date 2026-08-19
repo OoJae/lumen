@@ -92,6 +92,17 @@ call. Browser-direct inference is Wave 4. See [Honesty](#honesty-the-moat-is-pro
 
 Every headline claim in this README is checkable by a stranger. That is the point.
 
+**0. Open a companion's public proof page — no wallet, no install, one click.**
+
+> **https://lumen-snowy-two.vercel.app/companion/0xB5609C73784Aa81De2eBe01cCC04Eb7ea4ce1a52**
+
+That page reads 0G mainnet live and shows the companion's owner, its current
+encrypted-memory root, and its entire anchor history replayed as a chain — each
+anchor proving which root it replaced. It also asks the 0G Storage indexer
+whether the encrypted snapshot is retrievable right now, and answers with the
+number of nodes serving it. It reveals nothing about what the owner wrote,
+because it cannot.
+
 **1. The contract is real, verified, and used.**
 
 ```bash
