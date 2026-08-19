@@ -25,6 +25,11 @@ import type { JournalTurn, PersistedTurnV1, StorageReceipt } from '@lumen/shared
 import { decryptBytes, encryptBytes } from '@/lib/crypto/encrypt';
 import { bytesToVector, vectorToBytes } from '@/lib/crypto/canonical';
 import { embed, preloadEmbedder } from '@/lib/memory/embeddings';
+import {
+  createBoundedQueue,
+  DEFAULT_EMBED_CONCURRENCY,
+  type BoundedQueue,
+} from '@/lib/memory/embedQueue';
 import type { RecallableTurn } from '@/lib/memory/recall';
 import * as db from '@/lib/storage/db';
 import {
@@ -142,6 +147,27 @@ export function useJournalMemory(): JournalMemory {
 
   const { getKey, keyVersion, wallet, state: keyState } = memoryKey;
 
+  /**
+   * Embedding backfill runs through a bounded queue so a cold model slows the
+   * work instead of failing its tail. It used to be a bare `for` loop firing
+   * every vectorless turn at once; the worker embeds one at a time behind a
+   * single model promise, so the later items burned their whole 30s timeout
+   * queued and were dropped — search then quietly lacked older entries.
+   *
+   * Indirected through a ref so the queue itself is created ONCE and keeps a
+   * stable identity: rebuilding it whenever `embedAndPersist` changed would
+   * discard in-flight bookkeeping on every render that touched the key.
+   */
+  const embedRef = useRef<(turn: RecallableTurn) => Promise<void>>(() => Promise.resolve());
+  const embedQueue = useMemo<BoundedQueue<RecallableTurn>>(
+    () =>
+      createBoundedQueue<RecallableTurn>({
+        concurrency: DEFAULT_EMBED_CONCURRENCY,
+        run: (turn) => embedRef.current(turn),
+      }),
+    [],
+  );
+
   // Wallet transitions: anon → wallet keeps the session turns (they get
   // backfill-encrypted at unlock); wallet → other/none drops decrypted content.
   useEffect(() => {
@@ -157,12 +183,15 @@ export function useJournalMemory(): JournalMemory {
     }
     prevWalletRef.current = wallet;
     walletRef.current = wallet;
+    // Backfill queued for the previous wallet is dead work — embedAndPersist
+    // would bail on the wallet check anyway, but it would still occupy slots.
+    embedQueue.clear();
     if (wallet) {
       db.countTurns(wallet).then(setLockedCount).catch(() => setLockedCount(0));
     } else {
       setLockedCount(0);
     }
-  }, [wallet]);
+  }, [wallet, embedQueue]);
 
   const persistVector = useCallback(
     async (key: CryptoKey, forWallet: string, turnId: string, vector: number[]) => {
@@ -195,11 +224,15 @@ export function useJournalMemory(): JournalMemory {
 
   /** Best-effort async embed for a turn that lacks a vector. The wallet is
    *  captured NOW: if the user switches wallets before the model finishes,
-   *  nothing is persisted under the new wallet (no cross-wallet writes). */
+   *  nothing is persisted under the new wallet (no cross-wallet writes).
+   *
+   *  RETURNS the promise rather than firing and forgetting: the bounded queue
+   *  below has to be able to await it, or "concurrency 2" would mean nothing
+   *  and every turn would start at once — the exact bug this replaced. */
   const embedAndPersist = useCallback(
-    (turn: RecallableTurn) => {
+    (turn: RecallableTurn): Promise<void> => {
       const ownerWallet = walletRef.current;
-      void embed(turn.entry)
+      return embed(turn.entry)
         .then(async (vector) => {
           if (walletRef.current !== ownerWallet) return;
           setTurns((prev) =>
@@ -216,6 +249,11 @@ export function useJournalMemory(): JournalMemory {
     },
     [getKey, persistVector],
   );
+
+  // Point the queue at the current closure. Assigned during render rather than
+  // in an effect so a push that happens before effects flush still runs the
+  // real function instead of the no-op placeholder.
+  embedRef.current = embedAndPersist;
 
   const hydrate = useCallback(async () => {
     const key = getKey();
@@ -279,11 +317,15 @@ export function useJournalMemory(): JournalMemory {
     setLockedCount(0);
     preloadEmbedder();
     // Re-embed anything that never got a vector (model was offline, tab closed
-    // mid-embed, restored from another device) so recall covers it eventually.
+    // mid-embed, restored from another device) so recall and search cover it.
+    // THROUGH THE QUEUE, not a bare loop: the worker handles one embed at a
+    // time behind a single model promise, so firing N at once made the later
+    // ones spend their whole 30s timeout waiting in line and get dropped —
+    // which showed up as search quietly missing older entries.
     for (const turn of merged) {
-      if (!turn.embedding) embedAndPersist(turn);
+      if (!turn.embedding) embedQueue.push(turn.id, turn);
     }
-  }, [getKey, keyVersion, persistTurn, embedAndPersist, networkKey, otherKey]);
+  }, [getKey, keyVersion, persistTurn, embedQueue, networkKey, otherKey]);
 
   const unlock = useCallback(async () => {
     await memoryKey.unlock();
@@ -310,7 +352,9 @@ export function useJournalMemory(): JournalMemory {
       }
 
       // Embed asynchronously — never awaited by the reflect loop.
-      embedAndPersist(recallable);
+      // Straight through, not queued: a turn the user just wrote should embed
+      // now, not behind a backfill of their whole history.
+      void embedAndPersist(recallable);
     },
     [getKey, persistTurn, embedAndPersist],
   );
@@ -428,13 +472,14 @@ export function useJournalMemory(): JournalMemory {
         setForeignReceipt(null);
       }
 
-      // Turns restored without vectors get re-embedded here, best-effort.
+      // Same bounded queue as hydrate — a restore of hundreds of turns shares
+      // one concurrency budget with everything else in flight.
       for (const turn of restored) {
-        if (!turn.embedding) embedAndPersist(turn);
+        if (!turn.embedding) embedQueue.push(turn.id, turn);
       }
       return restored.length;
     },
-    [getKey, keyVersion, persistTurn, embedAndPersist, networkKey],
+    [getKey, keyVersion, persistTurn, embedQueue, networkKey],
   );
 
   const nothingSavedHere = useCallback(() => {

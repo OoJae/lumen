@@ -37,20 +37,35 @@ export function buildContextWithRecall(
   turns: JournalTurn[],
   recalled: JournalTurn[],
   newEntry: string,
+  /** The prompt the writer was shown. Until this existed the model could not
+   *  see the question being answered, so an entry that only made sense as a
+   *  reply ("not really, no") arrived with no idea what it replied to. */
+  prompt?: string,
 ): ChatMessage[] {
   const base = buildContext(turns, newEntry);
-  if (recalled.length === 0) return base;
-  const block = recalled
-    .map((turn) => `[${turn.createdAt.slice(0, 10)}] ${turn.entry}`)
-    .join('\n\n');
-  return [
-    {
+  const preamble: ChatMessage[] = [];
+
+  if (prompt && prompt.trim()) {
+    preamble.push({
+      role: 'system',
+      content:
+        `Today's journal page asked: "${prompt.trim()}" — the entry below may be ` +
+        'answering it. Do not repeat the question back.',
+    });
+  }
+
+  if (recalled.length > 0) {
+    const block = recalled
+      .map((turn) => `[${turn.createdAt.slice(0, 10)}] ${turn.entry}`)
+      .join('\n\n');
+    preamble.push({
       role: 'system',
       content:
         'Earlier entries from this journal, in the writer\'s own words — quietly ' +
         'draw on them when they are relevant:\n\n' +
         block,
-    },
-    ...base,
-  ];
+    });
+  }
+
+  return preamble.length > 0 ? [...preamble, ...base] : base;
 }

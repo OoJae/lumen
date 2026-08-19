@@ -96,3 +96,35 @@ describe('recallRelevant — never blocks the reflect loop', () => {
     await expect(recallRelevant('q', turns(MAX_CONTEXT_TURNS + 4, true))).resolves.toEqual([]);
   });
 });
+
+describe('buildContextWithRecall — the daily prompt', () => {
+  const turns: JournalTurn[] = [];
+
+  it('tells the model what question the page asked', () => {
+    const ctx = buildContextWithRecall(turns, [], 'not really, no', 'How are you, really?');
+    expect(ctx[0]!.role).toBe('system');
+    expect(ctx[0]!.content).toContain('How are you, really?');
+    // Without this the model saw "not really, no" with nothing to attach it to.
+    expect(ctx[0]!.content).toContain('Do not repeat the question back');
+  });
+
+  it('adds nothing when there is no prompt', () => {
+    const withPrompt = buildContextWithRecall(turns, [], 'entry', 'A question?');
+    const without = buildContextWithRecall(turns, [], 'entry');
+    expect(without).toHaveLength(withPrompt.length - 1);
+    expect(without.every((m) => m.role !== 'system')).toBe(true);
+  });
+
+  it('ignores a blank or whitespace-only prompt', () => {
+    expect(buildContextWithRecall(turns, [], 'entry', '   ')).toHaveLength(1);
+  });
+
+  it('puts the prompt before the recalled entries', () => {
+    const recalled: JournalTurn[] = [
+      { id: 'r', entry: 'older', reflection: '', attestation: null, createdAt: '2026-01-01T00:00:00.000Z' },
+    ];
+    const ctx = buildContextWithRecall(turns, recalled, 'entry', 'A question?');
+    expect(ctx[0]!.content).toContain('A question?');
+    expect(ctx[1]!.content).toContain('older');
+  });
+});

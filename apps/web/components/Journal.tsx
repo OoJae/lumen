@@ -60,7 +60,7 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
       // Recall reaches beyond the session window; it is budgeted (2.5s) and
       // failure-proof — the reflection always starts promptly.
       const recalled = await recallRelevant(entry, turns);
-      const result = await reflect(buildContextWithRecall(turns, recalled, entry));
+      const result = await reflect(buildContextWithRecall(turns, recalled, entry, prompt));
       if (result && result.text) {
         const turn: JournalTurn = {
           id: newTurnId(),
