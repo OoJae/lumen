@@ -109,6 +109,19 @@ describe('MemoryLibrary renders', () => {
     expect(html).toContain('aria-label="Your journal"');
   });
 
+  it('offers both export formats and warns the file is plaintext', () => {
+    const html = render();
+    expect(html).toContain('Take it with you');
+    expect(html).toContain('Markdown');
+    expect(html).toContain('JSON');
+    expect(html).toContain('the way you would a paper journal');
+    expect(html).toContain('re-verified later');
+  });
+
+  it('offers no export for an empty journal', () => {
+    expect(render([])).not.toContain('Take it with you');
+  });
+
   it('offers a delete affordance only when the caller supplies one', () => {
     const withDelete = renderToStaticMarkup(
       createElement(MemoryLibrary, {

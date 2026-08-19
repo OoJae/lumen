@@ -7,7 +7,20 @@ import { resurface, type Resurfaced } from '@/lib/memory/resurface';
 import { searchTurns, type SearchHit, type SearchResults } from '@/lib/memory/search';
 import type { RecallableTurn } from '@/lib/memory/recall';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
-import { CalendarIcon, CloseIcon, SearchIcon } from './icons';
+import { buildExportBundle } from '@/lib/export/bundle';
+import { CalendarIcon, CloseIcon, DownloadIcon, SearchIcon } from './icons';
+
+/** Hand a file to the browser. Same idiom as the recovery-key download: the
+ *  anchor is never attached to the DOM and the object URL is revoked at once. */
+function download(filename: string, contents: string, type: string) {
+  const blob = new globalThis.Blob([contents], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 /** Long enough that a fast typist doesn't queue an embed per keystroke. */
 const SEARCH_DEBOUNCE_MS = 220;
@@ -298,6 +311,49 @@ export function MemoryLibrary({
             </section>
           )}
         </div>
+
+        {turns.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-6 py-3">
+            <span className="mr-1 text-[11px] uppercase tracking-wide text-muted">Take it with you</span>
+            <button
+              type="button"
+              onClick={() => {
+                const bundle = buildExportBundle({
+                  turns,
+                  wallet: memory.wallet,
+                  receipt: memory.save.receipt,
+                  exportedAt: new Date().toISOString(),
+                });
+                download(bundle.markdownFilename, bundle.markdown, 'text/markdown');
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
+            >
+              <DownloadIcon width={13} height={13} />
+              Markdown
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const bundle = buildExportBundle({
+                  turns,
+                  wallet: memory.wallet,
+                  receipt: memory.save.receipt,
+                  exportedAt: new Date().toISOString(),
+                });
+                download(bundle.jsonFilename, bundle.json, 'application/json');
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
+            >
+              <DownloadIcon width={13} height={13} />
+              JSON
+            </button>
+            <span className="w-full text-[11px] leading-relaxed text-muted">
+              Everything, unencrypted, in formats that outlive Lumen. The JSON keeps each
+              reflection&apos;s enclave proof so it can be re-verified later. Store the file the way
+              you would a paper journal.
+            </span>
+          </div>
+        )}
 
         <p className="border-t border-border px-6 py-3 text-[11px] leading-relaxed text-muted">
           Searching happens in this browser. Your words are never sent anywhere to be indexed —
