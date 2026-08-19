@@ -31,7 +31,11 @@ export type MatchField = 'entry' | 'reflection' | 'both';
 
 export interface SearchHit {
   turn: RecallableTurn;
-  /** Literal: fraction of query terms present (1 = all). Semantic: cosine. */
+  /**
+   * Literal: fraction of query terms present, 1 for a whole-phrase match.
+   * Semantic: cosine similarity. Both groups are sorted by it descending, so
+   * this is never decorative.
+   */
   score: number;
   /** Where the literal match landed. Null for a semantic-only hit. */
   field: MatchField | null;
@@ -41,7 +45,7 @@ export interface SearchHit {
 
 export interface SearchResults {
   query: string;
-  /** Entries containing what you typed. Newest first — a fact needs no ranking. */
+  /** Entries containing what you typed, strongest match first then newest. */
   exact: SearchHit[];
   /** Entries the on-device model thinks are related. Never overlaps `exact`. */
   related: SearchHit[];
@@ -157,9 +161,17 @@ export function searchTurns(
     });
   }
 
-  // Newest first. A literal match is certain, so ordering by a made-up relevance
-  // number would be less useful than ordering by when it happened.
-  exact.sort((a, b) => b.turn.createdAt.localeCompare(a.turn.createdAt));
+  // Strength first, then recency.
+  //
+  // Ordering by date alone looked defensible — "a literal match is a fact, so
+  // rank by when it happened" — but textScore is an OR: searching "anxious
+  // about work" matches an entry containing only the word "about" at 1/3, and
+  // date-only ordering happily put that above the entry containing the exact
+  // phrase. Worse, the limit then truncated from the date-sorted list, so the
+  // best match could be cut entirely.
+  exact.sort(
+    (a, b) => b.score - a.score || b.turn.createdAt.localeCompare(a.turn.createdAt),
+  );
 
   let related: SearchHit[] = [];
   if (queryVector && queryVector.length > 0) {

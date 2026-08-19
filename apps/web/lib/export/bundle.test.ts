@@ -179,3 +179,33 @@ describe('bundle', () => {
     expect(JSON.parse(b.json).entries).toEqual([]);
   });
 });
+
+describe('export does not carry embedding vectors', () => {
+  it('strips them even though the caller passes RecallableTurns', () => {
+    // memory.turns are JournalTurn & { embedding?: number[] }. Widening to
+    // JournalTurn is legal for a variable, so nothing complained while 384
+    // floats per entry were being serialised into the file.
+    const withVector = {
+      ...turn('a', 'entry', '2026-08-01T10:00:00.000Z'),
+      embedding: Array.from({ length: 384 }, (_, i) => i / 384),
+    };
+    const bundle = buildExportBundle(input({ turns: [withVector] }));
+    expect(bundle.json).not.toContain('embedding');
+    const parsed = JSON.parse(bundle.json) as { entries: Record<string, unknown>[] };
+    expect(Object.keys(parsed.entries[0]!).sort()).toEqual([
+      'attestation',
+      'createdAt',
+      'entry',
+      'id',
+      'reflection',
+    ]);
+  });
+
+  it('stays small for a journal with vectors on every entry', () => {
+    const turns = Array.from({ length: 20 }, (_, i) => ({
+      ...turn(`t${i}`, 'a short entry', `2026-08-${String(i + 1).padStart(2, '0')}T10:00:00.000Z`),
+      embedding: Array.from({ length: 384 }, () => 0.123456789),
+    }));
+    expect(buildExportBundle(input({ turns })).json.length).toBeLessThan(8_000);
+  });
+});

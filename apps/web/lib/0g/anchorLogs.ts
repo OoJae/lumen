@@ -53,9 +53,15 @@ async function blockTimes(
   max: number,
 ): Promise<Map<bigint, number>> {
   const distinct = [...new Set(blockNumbers)];
+  // eth_getLogs returns ascending by block and Set preserves insertion order,
+  // so slicing from the FRONT would time the oldest blocks and leave the newest
+  // undated — and undated days are dropped from the practice record. For a
+  // prolific anchorer that silently erased their most recent activity, which is
+  // exactly the part anyone looking at the page cares about. Keep the tail.
+  const budgeted = distinct.slice(-Math.max(0, max));
   const times = new Map<bigint, number>();
   await Promise.all(
-    distinct.slice(0, Math.max(0, max)).map(async (bn) => {
+    budgeted.map(async (bn) => {
       times.set(bn, await blockTime(client, bn));
     }),
   );

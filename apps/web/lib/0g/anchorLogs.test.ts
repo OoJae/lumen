@@ -156,3 +156,22 @@ describe('readAnchorLogs', () => {
     expect(logs.anchors[0]).toMatchObject({ seq: 0, prevRoot: '', newRoot: '' });
   });
 });
+
+describe('the timestamp budget keeps the NEWEST blocks', () => {
+  it('dates recent anchors and drops old ones when capped', async () => {
+    // eth_getLogs returns ascending by block, so slicing from the front timed
+    // the oldest and left a prolific anchorer's most recent activity undated —
+    // and undated days are dropped from the practice record entirely.
+    const anchored = Array.from({ length: 10 }, (_, i) => anchorLog(i + 1, R1, R2, BigInt(600 + i)));
+    const blocks = Object.fromEntries(anchored.map((_, i) => [String(600 + i), 1_000 + i]));
+    const logs = await readAnchorLogs(reader({ anchored, blocks }), ADDRESS, 2n, FROM, {
+      maxTimestampLookups: 3,
+    });
+
+    const dated = logs.anchors.filter((a) => a.timestamp > 0).map((a) => a.seq);
+    expect(dated).toEqual([8, 9, 10]);
+    expect(logs.anchors.filter((a) => a.timestamp === 0).map((a) => a.seq)).toEqual([
+      1, 2, 3, 4, 5, 6, 7,
+    ]);
+  });
+});

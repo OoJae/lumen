@@ -69,8 +69,13 @@ export function createBoundedQueue<T>(options: BoundedQueueOptions<T>): BoundedQ
         )
         .then(() => {
           active--;
-          // Keep the key: a failed embed retried immediately would just fail
-          // again. hydrate() re-queues it next unlock, which is the right cadence.
+          // Release the key. It guards against double-queueing while an item is
+          // WAITING or RUNNING, which is all the de-duplication that is wanted;
+          // holding it forever meant a failed embed could never be retried, in
+          // this session or any later one, because the queue lives as long as
+          // the hook. clear() cannot release it either — that only walks the
+          // waiting list.
+          known.delete(next.key);
           pump();
           settleIdle();
         });

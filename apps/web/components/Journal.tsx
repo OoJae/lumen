@@ -47,6 +47,15 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   // and deliberately NOT persisted: putting provenance on JournalTurn would
   // change the on-disk format, and this is worth showing, not storing.
   const [recalledBy, setRecalledBy] = useState<Record<string, JournalTurn[]>>({});
+
+  // Drop recall provenance when the wallet changes. useJournalMemory clears
+  // `turns` on a wallet switch, but this map holds references to the SAME
+  // decrypted turn objects — so without this, wallet A's entries stayed live in
+  // Journal's state, and readable through the recall chip, after switching to
+  // wallet B. Journal is never remounted, so nothing else would clear it.
+  useEffect(() => {
+    setRecalledBy({});
+  }, [memory.wallet]);
   const { text, attestation, status, error, reflect, reset } = useStreamingReflection();
 
   const prompt = useMemo(() => promptOfTheDay(), []);

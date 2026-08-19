@@ -62,9 +62,29 @@ const NOTE =
   'Exported from Lumen. These entries were encrypted on the device that wrote them; ' +
   'this file is plaintext, so store it the way you would a paper journal.';
 
+/**
+ * Project to exactly the five documented fields.
+ *
+ * Callers pass `memory.turns`, which are RecallableTurn — JournalTurn plus a
+ * 384-float `embedding`. Widening to JournalTurn is legal for a variable, so
+ * TypeScript never complains, and canonicalJson happily serialised every vector
+ * into the export: megabytes of machine noise in a file a person is meant to
+ * read, containing data they never asked to take with them. Mirrors
+ * useJournalMemory's own toPersisted, and for the same reason.
+ */
+function projected(turn: JournalTurn): JournalTurn {
+  return {
+    id: turn.id,
+    entry: turn.entry,
+    reflection: turn.reflection,
+    attestation: turn.attestation,
+    createdAt: turn.createdAt,
+  };
+}
+
 function chronological(turns: readonly JournalTurn[]): JournalTurn[] {
   // Oldest first: a journal reads forwards, even though the app shows newest first.
-  return [...turns].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return [...turns].map(projected).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 function heading(iso: string): string {

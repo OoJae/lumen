@@ -89,7 +89,7 @@ describe('snippet', () => {
 });
 
 describe('searchTurns — literal', () => {
-  it('finds entries containing the query, newest first', () => {
+  it('finds entries containing the query; equal scores fall back to newest first', () => {
     const r = searchTurns('work', CORPUS, null);
     expect(r.exact.map((h) => h.turn.id)).toEqual(['c', 'a']);
   });
@@ -166,5 +166,37 @@ describe('searchTurns — semantic', () => {
     const r = searchTurns('kestrel', many, null);
     expect(r.exact).toHaveLength(10);
     expect(r.exact.map((h) => h.turn.id)).toContain('t9');
+  });
+});
+
+describe('literal results rank by strength, not just date', () => {
+  const PHRASE = turn(
+    'gold',
+    'I am anxious about work and cannot sleep.',
+    '',
+    '2026-08-01T10:00:00.000Z',
+  );
+  const WEAK = turn('weak', 'Thinking about the party this weekend.', '', '2026-08-10T10:00:00.000Z');
+
+  it('puts an exact phrase match above a newer one-word match', () => {
+    // textScore is an OR, so "about" alone scores 1/3 and used to win on date.
+    const r = searchTurns('anxious about work', [WEAK, PHRASE], null);
+    expect(r.exact.map((h) => h.turn.id)).toEqual(['gold', 'weak']);
+    expect(r.exact[0]!.score).toBe(1);
+    expect(r.exact[1]!.score).toBeCloseTo(1 / 3);
+  });
+
+  it('breaks ties on recency', () => {
+    const older = turn('older', 'work', '', '2026-08-01T10:00:00.000Z');
+    const newer = turn('newer', 'work', '', '2026-08-10T10:00:00.000Z');
+    expect(searchTurns('work', [older, newer], null).exact.map((h) => h.turn.id)).toEqual([
+      'newer',
+      'older',
+    ]);
+  });
+
+  it('does not let the limit cut the strongest match', () => {
+    const r = searchTurns('anxious about work', [WEAK, PHRASE], null, { limit: 1 });
+    expect(r.exact.map((h) => h.turn.id)).toEqual(['gold']);
   });
 });

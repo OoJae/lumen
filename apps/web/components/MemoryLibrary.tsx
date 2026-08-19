@@ -154,17 +154,25 @@ export function MemoryLibrary({
   const inputRef = useRef<HTMLInputElement>(null);
   const runId = useRef(0);
 
+  // Mount-only. Kept apart from the Escape handler because `onClose` is an
+  // inline arrow in the parent and so changes identity every render — and
+  // Journal re-renders on every settled backfill embed. Bundled together, this
+  // effect re-ran dozens of times while the library was open, yanking focus back
+  // into the search box each time.
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    inputRef.current?.focus();
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
     document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    inputRef.current?.focus();
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   // Embed the query on a debounce. Literal results render immediately and are
@@ -172,12 +180,16 @@ export function MemoryLibrary({
   // doesn't appear and the footer says so.
   useEffect(() => {
     const text = query.trim();
+    // Bump the run id FIRST, including on the empty branch. Otherwise an embed
+    // already in flight for a previous query still matches `runId.current` when
+    // it resolves, and clearing the box then retyping could apply a vector for
+    // text the user had abandoned.
+    const id = ++runId.current;
     if (!text) {
       setQueryVector(null);
       setEmbedding(false);
       return;
     }
-    const id = ++runId.current;
     setEmbedding(true);
     const timer = setTimeout(() => {
       void Promise.race([

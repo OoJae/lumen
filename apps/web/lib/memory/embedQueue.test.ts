@@ -83,14 +83,28 @@ describe('createBoundedQueue', () => {
     expect(q.pending).toBe(0);
   });
 
-  it('does not retry a failed key immediately — the next unlock re-queues it', async () => {
+  it('releases a key once settled, so a later pass CAN retry it', async () => {
+    // The dedupe guard is only meant to cover "waiting or running". Holding the
+    // key after settle meant a failed embed could never be retried for the life
+    // of the hook — and clear() could not release it either, since that walks
+    // only the waiting list.
     const c = controllable();
     const q = createBoundedQueue({ concurrency: 1, run: c.run });
     q.push('a', 'a');
     await tick();
     await c.fail('a');
-    expect(q.push('a', 'a')).toBe(false);
-    expect(c.started).toEqual(['a']);
+    expect(q.push('a', 'a')).toBe(true);
+    await tick();
+    expect(c.started).toEqual(['a', 'a']);
+  });
+
+  it('releases a key after SUCCESS too', async () => {
+    const c = controllable();
+    const q = createBoundedQueue({ concurrency: 1, run: c.run });
+    q.push('a', 'a');
+    await tick();
+    await c.finish('a');
+    expect(q.push('a', 'a')).toBe(true);
   });
 
   it('resolves onIdle once everything drains', async () => {
