@@ -10,6 +10,7 @@ import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
 import { restoreSkippedNotice } from '@/lib/storage/deleteCopy';
+import { persistFailureNotice, undecryptableNotice } from '@/lib/crypto/unlockCopy';
 import { foreignPointerNotice } from '@/lib/storage/saveStatus';
 import { FundingRemedy } from './FundingRemedy';
 import { CalendarIcon, CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
@@ -41,6 +42,8 @@ export function MemoryStrip({
   const [open, setOpen] = useState<OpenModal>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
   const { keyState, turns, lockedCount, save } = memory;
+  const undecryptable = undecryptableNotice(memory.undecryptableCount);
+  const persistFailure = persistFailureNotice(memory.persistFailureCount);
   const net = activeNetwork();
   const guard = useChainGuard();
 
@@ -143,6 +146,32 @@ export function MemoryStrip({
   // unlocked
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2.5">
+      {/* An unproven key, entries this key cannot open, and writes that failed —
+          each is a thing the strip used to say nothing about while claiming
+          "Encrypted on this device". */}
+      {memory.keyNotice && (
+        <div
+          className={`w-full rounded-xl border px-3 py-2 text-xs leading-relaxed ${
+            memory.keyNotice.tone === 'caution'
+              ? 'border-caution/40 bg-caution/10 text-caution'
+              : 'border-border bg-canvas/40 text-muted'
+          }`}
+        >
+          <span className="block font-medium text-ink">{memory.keyNotice.title}</span>
+          {memory.keyNotice.body}
+        </div>
+      )}
+      {undecryptable && (
+        <p className="w-full rounded-xl border border-border bg-canvas/40 px-3 py-2 text-xs leading-relaxed text-muted">
+          {undecryptable}
+        </p>
+      )}
+      {persistFailure && (
+        <p className="w-full rounded-xl border border-caution/40 bg-caution/10 px-3 py-2 text-xs leading-relaxed text-caution">
+          {persistFailure}
+        </p>
+      )}
+
       <SyncChip memory={memory} onOpenReceipt={() => setOpen('receipt')} />
       {save.dirty &&
         (guard.blocked ? (

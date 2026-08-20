@@ -276,3 +276,28 @@ export async function deleteVectors(wallet: string, turnIds: readonly string[]):
     for (const id of turnIds) vectors.delete(id);
   });
 }
+
+/**
+ * Every ciphertext artifact this wallet holds, turns first.
+ *
+ * Feeds `probeArtifacts` (lib/crypto/keyTrust.ts), which decides whether a
+ * candidate key is really this journal's key. A turn comes first because it is
+ * the strongest single proof — an authenticated decrypt of real user data —
+ * and the generator shape lets the probe stop at the first success instead of
+ * loading the whole store.
+ *
+ * I/O only, no decisions: everything that could be wrong lives in the pure
+ * module, which is the half this repo can actually test.
+ */
+export async function* iterateCiphertext(
+  wallet: string,
+): AsyncGenerator<{ typ: 'turn' | 'vector'; aadId: string; envelope: EncryptedEnvelope }> {
+  const turns = await getTurns(wallet);
+  for (const record of turns) {
+    yield { typ: 'turn', aadId: `${wallet}:${record.meta.id}`, envelope: record.envelope };
+  }
+  const vectors = await getVectors(wallet);
+  for (const { turnId, envelope } of vectors) {
+    yield { typ: 'vector', aadId: `${wallet}:${turnId}`, envelope };
+  }
+}

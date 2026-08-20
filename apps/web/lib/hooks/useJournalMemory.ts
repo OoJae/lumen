@@ -45,6 +45,8 @@ import {
   type BoundedQueue,
 } from '@/lib/memory/embedQueue';
 import type { RecallableTurn } from '@/lib/memory/recall';
+import type { KeyTrust } from '@/lib/crypto/keyTrust';
+import type { UnlockNotice } from '@/lib/crypto/unlockCopy';
 import * as db from '@/lib/storage/db';
 import {
   buildSnapshot,
@@ -108,7 +110,16 @@ export interface JournalMemory {
   unlock(): Promise<void>;
   unlockWithRecoveryKey(hex: string): Promise<void>;
   lock(): void;
-  exportRecoveryKey(): Promise<string>;
+  exportRecoveryKey(): Promise<{ hex: string; trust: KeyTrust }>;
+  /** How well this device could check the live key. Null unless unlocked. */
+  trust: KeyTrust | null;
+  /** What to say about an unproven key; null when there is nothing to say. */
+  keyNotice: UnlockNotice | null;
+  /** Stored entries that did NOT decrypt with the live key — written under a
+   *  different one. They are still there; they are just not shown. */
+  undecryptableCount: number;
+  /** Entries whose local write FAILED. They render, but a reload loses them. */
+  persistFailureCount: number;
   save: {
     state: SaveState;
     error: SaveError | null;
@@ -161,6 +172,14 @@ export function useJournalMemory(): JournalMemory {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<SaveError | null>(null);
   const [deletions, setDeletions] = useState<DeletedTurnV1[]>([]);
+  const [undecryptableCount, setUndecryptableCount] = useState(0);
+  /**
+   * Local writes that were rejected. Every persist used to be
+   * `.catch(() => {})` while SyncChip said "Encrypted on this device" — an
+   * affirmative durability claim about an entry that was never written and is
+   * gone on reload. deleteTurn already did this correctly; the write path did not.
+   */
+  const [persistFailureCount, setPersistFailureCount] = useState(0);
 
   const turnsRef = useRef<RecallableTurn[]>(turns);
   turnsRef.current = turns;
@@ -352,13 +371,26 @@ export function useJournalMemory(): JournalMemory {
       )
     ).filter((t): t is RecallableTurn => t !== null);
 
+    // Entries that exist but did not open with this key. They were written
+    // under a different one — say so rather than let them vanish silently.
+    const failedToDecrypt = storedTurns.filter((r) => !deletedIds.has(r.meta.id)).length -
+      hydrated.length;
+    setUndecryptableCount(Math.max(0, failedToDecrypt));
+    // One authenticated decrypt of real wallet-bound ciphertext PROVES this key.
+    // This is what promotes a fresh-device recovery unlock from 'asserted'.
+    if (hydrated.length > 0) void memoryKey.confirmKeyProven();
+
     // Backfill: session turns written before the wallet existed. The deleted
     // filter is load-bearing — without it a turn removed from the store while
     // another tab still holds it in state is re-persisted right here, and the
     // delete silently undoes itself.
     const known = new Set(hydrated.map((t) => t.id));
     const backfill = backfillCandidates(turnsRef.current, known, deletedIds);
-    await Promise.all(backfill.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})));
+    const backfilled = await Promise.allSettled(
+      backfill.map((turn) => persistTurn(key, forWallet, turn)),
+    );
+    const backfillFailures = backfilled.filter((r) => r.status === 'rejected').length;
+    if (backfillFailures > 0) setPersistFailureCount((n) => n + backfillFailures);
 
     const merged = [...hydrated, ...backfill].sort(byCreatedAt);
     setTurns(merged);
@@ -411,7 +443,11 @@ export function useJournalMemory(): JournalMemory {
       const key = getKey();
       const forWallet = walletRef.current;
       if (key && forWallet) {
-        void persistTurn(key, forWallet, recallable).catch(() => {});
+        void persistTurn(key, forWallet, recallable).catch(() => {
+          // The entry is on screen but not on disk. Surface it — a reload will
+          // lose it, and the chip must stop claiming it is stored.
+          setPersistFailureCount((n) => n + 1);
+        });
       }
 
       // Embed asynchronously — never awaited by the reflect loop.
@@ -564,6 +600,9 @@ export function useJournalMemory(): JournalMemory {
       const { downloadBlob } = await zg();
       const bytes = await downloadBlob(rootHash.trim());
       const snapshot = await decryptSnapshot(key, bytes, { wallet: forWallet, keyVersion });
+      // The snapshot decrypted, so this key is provably the journal's key. On a
+      // fresh device this is the moment a recovery unlock becomes 'proven'.
+      void memoryKey.confirmKeyProven();
 
       // Learn deletions the snapshot carries BEFORE merging, and hard-delete
       // anything they cover. This line is what makes cross-device deletion real
@@ -585,7 +624,11 @@ export function useJournalMemory(): JournalMemory {
         .map((t) => ({ ...t, embedding: vectorMap.get(t.id) }));
 
       await Promise.all(
-        restorable.map((turn) => persistTurn(key, forWallet, turn).catch(() => {})),
+        restorable.map((turn) =>
+          persistTurn(key, forWallet, turn).catch(() => {
+            setPersistFailureCount((n) => n + 1);
+          }),
+        ),
       );
 
       const { merged, added, skippedDeleted } = mergeRestored(
@@ -699,6 +742,10 @@ export function useJournalMemory(): JournalMemory {
       unlockWithRecoveryKey,
       lock: memoryKey.lock,
       exportRecoveryKey: memoryKey.exportRecoveryKey,
+      trust: memoryKey.trust,
+      keyNotice: memoryKey.notice,
+      undecryptableCount,
+      persistFailureCount,
       save,
       restoreFromRoot,
       verifyOnZg,
@@ -716,6 +763,10 @@ export function useJournalMemory(): JournalMemory {
       unlockWithRecoveryKey,
       memoryKey.lock,
       memoryKey.exportRecoveryKey,
+      memoryKey.trust,
+      memoryKey.notice,
+      undecryptableCount,
+      persistFailureCount,
       save,
       restoreFromRoot,
       verifyOnZg,

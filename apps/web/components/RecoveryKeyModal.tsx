@@ -1,5 +1,7 @@
 'use client';
 
+import { exportTrustNotice } from '@/lib/crypto/unlockCopy';
+import type { KeyTrust } from '@/lib/crypto/keyTrust';
 import { useEffect, useState } from 'react';
 
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
@@ -20,6 +22,9 @@ export function RecoveryKeyModal({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** How well Lumen could check the exported key. Shown beside it — exporting
+   *  an unchecked key is legitimate on a new journal, but the user must know. */
+  const [trust, setTrust] = useState<KeyTrust | null>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -30,6 +35,10 @@ export function RecoveryKeyModal({
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
+      // Don't leave 32 bytes of key material in React state after the modal
+      // closes; it is the one secret this component holds.
+      setHex(null);
+      setTrust(null);
     };
   }, [onClose]);
 
@@ -37,7 +46,9 @@ export function RecoveryKeyModal({
     setBusy(true);
     setError(null);
     try {
-      setHex(await memory.exportRecoveryKey());
+      const exported = await memory.exportRecoveryKey();
+      setHex(exported.hex);
+      setTrust(exported.trust);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed');
     } finally {
@@ -113,6 +124,15 @@ export function RecoveryKeyModal({
             <code className="mt-4 block break-all rounded-xl border border-border bg-canvas/50 p-3 font-mono text-xs leading-relaxed text-ink">
               {hex}
             </code>
+            {trust && (
+              <p
+                className={`mt-2 text-xs leading-relaxed ${
+                  trust === 'proven' ? 'text-muted' : 'text-caution'
+                }`}
+              >
+                {exportTrustNotice(trust)}
+              </p>
+            )}
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
