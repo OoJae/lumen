@@ -10,6 +10,11 @@ import { ReflectionCard } from './ReflectionCard';
 import { AttestationViewer } from './AttestationViewer';
 import { MemoryLibrary } from './MemoryLibrary';
 import { DeleteEntryDialog } from './DeleteEntryDialog';
+import { SealSheet } from './SealSheet';
+import { PracticeArchive } from './PracticeArchive';
+import { useSeal } from '@/lib/hooks/useSeal';
+import { insufficientFundsRemedy, TYPICAL_SAVE_COST } from '@/lib/storage/saveErrorCopy';
+import { TYPICAL_ANCHOR_COST } from '@/lib/0g/companion';
 import { useCompanion } from '@/lib/hooks/useCompanion';
 import type { RecallableTurn } from '@/lib/memory/recall';
 import { BookIcon } from './icons';
@@ -38,6 +43,12 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   // needs to know whether a root is anchored to say what deleting can and
   // cannot undo. One instance, so there is only ever one tx state machine.
   const companion = useCompanion(memory);
+  // Owned here for the same reason companion is: the run must survive the sheet
+  // closing, because step 1 costs real money and forgetting it would charge the
+  // user twice.
+  const seal = useSeal(memory, companion);
+  const net = activeNetwork();
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [viewer, setViewer] = useState<AttestationInfo | null>(null);
@@ -125,7 +136,39 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
 
         <ChainGuardBanner />
 
-        <MemoryStrip memory={memory} companion={companion} />
+        <MemoryStrip
+          memory={memory}
+          companion={companion}
+          seal={seal}
+          onOpenArchive={() => setArchiveOpen(true)}
+        />
+
+        {seal.nudge.tier === 'raised' && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3">
+            <div className="flex-1">
+              <p className="text-sm text-ink">{seal.nudge.headline}</p>
+              {seal.nudge.detail && (
+                <p className="mt-0.5 text-xs leading-relaxed text-muted">{seal.nudge.detail}</p>
+              )}
+            </div>
+            <span className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={seal.dismissNudge}
+                className="text-xs text-muted underline hover:text-ink"
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                onClick={seal.begin}
+                className="rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90"
+              >
+                Seal
+              </button>
+            </span>
+          </div>
+        )}
 
         {memory.keyState === 'unlocked' && turns.length > 0 && (
           <button
@@ -180,6 +223,58 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
           memory={memory}
           onClose={() => setLibraryOpen(false)}
           onDelete={(turn) => setPendingDelete(turn)}
+        />
+      )}
+
+      {seal.open && (
+        <SealSheet
+          networkLabel={net.label}
+          phase={seal.phase}
+          plan={seal.activePlan}
+          primaryAction={seal.primaryAction}
+          cost={seal.cost}
+          unsealed={seal.unsealed}
+          savedRoot={seal.run?.savedRoot ?? null}
+          savedSeq={seal.run?.seq ?? null}
+          txUrl={companion.tx.explorerTxUrl}
+          preflightMessage={seal.preflight.ok ? null : seal.preflight.message}
+          saveErrorMessage={memory.save.error?.message ?? null}
+          saveFundingRemedy={
+            memory.save.error?.kind === 'insufficient-funds'
+              ? insufficientFundsRemedy(net, memory.wallet, {
+                  cost: TYPICAL_SAVE_COST,
+                  what: 'storage fee',
+                  retry: 'save again',
+                })
+              : null
+          }
+          anchorErrorMessage={companion.tx.failure?.message ?? null}
+          anchorFundingRemedy={
+            companion.tx.failure?.funding
+              ? insufficientFundsRemedy(net, memory.wallet, {
+                  cost: TYPICAL_ANCHOR_COST,
+                  what: 'anchor',
+                  retry: 'anchor again',
+                })
+              : null
+          }
+          onPrimary={() => {
+            if (seal.primaryAction === 'save') void seal.save();
+            else if (seal.primaryAction === 'anchor') void seal.anchor();
+            else if (seal.primaryAction === 'switch-chain') void seal.switchChain();
+            else seal.close();
+          }}
+          onClose={seal.close}
+        />
+      )}
+
+      {archiveOpen && (
+        <PracticeArchive
+          archive={seal.archive}
+          networkLabel={net.label}
+          explorerUrl={net.explorerUrl}
+          proofUrl={memory.wallet ? `/companion/${memory.wallet}` : null}
+          onClose={() => setArchiveOpen(false)}
         />
       )}
 

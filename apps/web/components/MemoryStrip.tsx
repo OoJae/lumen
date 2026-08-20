@@ -5,13 +5,14 @@ import { useState } from 'react';
 import { shortRoot, TYPICAL_ANCHOR_COST } from '@/lib/0g/companion';
 import { activeNetwork } from '@/lib/0g/network';
 import type { Companion } from '@/lib/hooks/useCompanion';
+import type { Seal } from '@/lib/hooks/useSeal';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
 import { restoreSkippedNotice } from '@/lib/storage/deleteCopy';
 import { foreignPointerNotice } from '@/lib/storage/saveStatus';
 import { FundingRemedy } from './FundingRemedy';
-import { CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
+import { CalendarIcon, CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
 import { MintCompanionSheet } from './MintCompanionSheet';
 import { OnboardingSheet } from './OnboardingSheet';
 import { RecoveryKeyModal } from './RecoveryKeyModal';
@@ -26,11 +27,16 @@ type OpenModal = 'onboarding' | 'receipt' | 'recovery' | 'mint' | null;
 export function MemoryStrip({
   memory,
   companion,
+  seal,
+  onOpenArchive,
 }: {
   memory: JournalMemory;
   /** Owned by Journal and passed down, so ONE place holds the in-flight write
    *  state. Two useCompanion instances would mean two tx state machines. */
   companion: Companion;
+  /** Also owned by Journal — the run has to outlive the sheet. */
+  seal: Seal;
+  onOpenArchive: () => void;
 }) {
   const [open, setOpen] = useState<OpenModal>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
@@ -169,6 +175,18 @@ export function MemoryStrip({
         onOpenReceipt={save.receipt ? () => setOpen('receipt') : null}
       />
 
+      {companion.tokenId !== null && (
+        <button
+          type="button"
+          onClick={onOpenArchive}
+          title="The days this wallet sealed a snapshot, read from the chain. A record, not a score."
+          className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:border-accent/40 hover:text-ink"
+        >
+          <CalendarIcon width={13} height={13} />
+          Archive
+        </button>
+      )}
+
       {/* The share surface. A companion nobody can check is just a claim — this
           link is the page where a stranger verifies it without a wallet. */}
       {companion.tokenId !== null && memory.wallet && (
@@ -187,6 +205,7 @@ export function MemoryStrip({
         memory={memory}
         companion={companion}
         guard={guard}
+        seal={seal}
         onMint={() => setOpen('mint')}
       />
 
@@ -392,11 +411,13 @@ function CompanionBlock({
   memory,
   companion,
   guard,
+  seal,
   onMint,
 }: {
   memory: JournalMemory;
   companion: Companion;
   guard: ReturnType<typeof useChainGuard>;
+  seal: Seal;
   onMint: () => void;
 }) {
   const net = activeNetwork();
@@ -439,6 +460,24 @@ function CompanionBlock({
       </p>
     ) : null;
 
+  /**
+   * Routed through the seal gate rather than calling `companion.anchor()`
+   * directly — which fixed a real bug. This button used to render enabled while
+   * a save was in flight and while a previous tx was still pending: clicking it
+   * mid-save anchored the PREVIOUS receipt for a real fee, and clicking twice
+   * sent a second anchor that reverted. `sealPlan` reports `busy` in both
+   * cases, so the button now disables itself.
+   */
+  const sealBlocked = seal.plan.kind === 'blocked';
+  const sealInvite = (
+    <button
+      type="button"
+      onClick={seal.begin}
+      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90"
+    >
+      {seal.plan.steps === 2 ? 'Seal — 2 signatures' : 'Seal'}
+    </button>
+  );
   const anchorAction = guard.blocked ? (
     <button
       type="button"
@@ -451,10 +490,11 @@ function CompanionBlock({
   ) : (
     <button
       type="button"
-      onClick={() => void companion.anchor()}
-      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90"
+      onClick={seal.begin}
+      disabled={sealBlocked}
+      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90 disabled:opacity-50"
     >
-      Anchor this save
+      {seal.plan.blocked === 'busy' ? 'Working…' : 'Seal this save'}
     </button>
   );
 
@@ -602,6 +642,13 @@ function CompanionBlock({
             {skippedDeleted > 0 && ` ${restoreSkippedNotice(restored, skippedDeleted)}`}
           </>,
         );
+      }
+      // The strip-tier seal invite. This branch covers 'synced', where the block
+      // otherwise renders nothing at all — and 'synced' with unsaved entries is
+      // exactly the state where sealing is worth offering. `sealNudge` returns
+      // 'none' for every blocked plan, so a clean journal still shows nothing.
+      if (seal.nudge.tier !== 'none' && seal.plan.kind !== 'blocked') {
+        return shell(<>{seal.nudge.headline}</>, sealInvite);
       }
       return txNotice ? (
         <div className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-border bg-canvas/40 px-3 py-2">
