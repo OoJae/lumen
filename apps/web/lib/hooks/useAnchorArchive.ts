@@ -38,8 +38,10 @@ export interface AnchorArchive {
   calendar: PracticeCalendar | null;
   /** Whole UTC days since the most recent sealed day. null when unknown. */
   daysSinceLastSeal: number | null;
-  /** null when the chain has not been read. */
+  /** null when the chain has not been read, or was read incompletely. */
   everSealed: boolean | null;
+  /** The log set is provably short of what the contract reports. */
+  partial: boolean;
   refetch: () => void;
 }
 
@@ -80,10 +82,11 @@ export function useAnchorArchive(companion: Companion): AnchorArchive {
 
   const chain = query.data ?? null;
 
-  // One clock read per mount, not per render — the calendar must not shift
-  // underneath a rerender, and `practice.ts` takes `today` as an argument
-  // precisely so it never reaches for one itself.
-  const today = useMemo(() => todayUtc(), []);
+  // Recomputed whenever the data refreshes rather than frozen at mount. Journal
+  // never unmounts, so a pinned `today` meant that after the tab crossed UTC
+  // midnight buildPracticeCalendar's `d <= today` guard silently DISCARDED a
+  // genuine anchor dated the next day — dropping the seal the user just made.
+  const today = useMemo(() => todayUtc(), [query.dataUpdatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const calendar = useMemo(
     () =>
@@ -107,9 +110,27 @@ export function useAnchorArchive(companion: Companion): AnchorArchive {
     return Math.max(0, dayDiff(last, today));
   }, [calendar, today]);
 
+  /**
+   * Did the log read actually see everything the contract says exists?
+   *
+   * `readAnchorLogs` swallows every error by design — a failed getLogs returns
+   * `[]`, a failed getBlock returns timestamp 0 — so `query.isError` is
+   * unreachable and a total RPC failure arrived here looking like a companion
+   * that had simply never sealed. The archive then rendered an EMPTY grid under
+   * "Read from 0G mainnet just now", above a panel asserting the record cannot
+   * be altered. That is the most expensive kind of wrong this product can be.
+   *
+   * The contract's own anchorCount is an independent read, so a shortfall
+   * against it proves the log set is incomplete. Same idea as the public proof
+   * page's agreesWithContract cross-check.
+   */
+  const expectedAnchors = companion.anchorCount;
+  const partial =
+    chain !== null && expectedAnchors !== null && chain.links.length < expectedAnchors;
+
   const status: AnchorArchive['status'] = !enabled
     ? 'idle'
-    : query.isError
+    : query.isError || partial
       ? 'error'
       : chain
         ? 'ok'
@@ -119,10 +140,12 @@ export function useAnchorArchive(companion: Companion): AnchorArchive {
     status,
     chain,
     calendar,
-    daysSinceLastSeal,
+    partial,
+    daysSinceLastSeal: status === 'ok' ? daysSinceLastSeal : null,
     // A companion that has never sealed has an empty record — but only say so
-    // once the chain has actually been read.
-    everSealed: chain ? chain.practiceDays.length > 0 : null,
+    // once the chain has been read COMPLETELY. An incomplete read that looks
+    // empty must not become "nothing here is sealed yet".
+    everSealed: status === 'ok' && chain ? chain.practiceDays.length > 0 : null,
     refetch: () => void query.refetch(),
   };
 }

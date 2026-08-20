@@ -236,7 +236,19 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
           unsealed={seal.unsealed}
           savedRoot={seal.run?.savedRoot ?? null}
           savedSeq={seal.run?.seq ?? null}
-          txUrl={companion.tx.explorerTxUrl}
+          txUrl={
+            // Only when a transaction was actually broadcast. useCompanion.fail()
+            // MERGES into the existing tx rather than resetting it, so every
+            // pre-send failure (network, ZeroRoot, SameRoot) leaves the previous
+            // tx's hash in place — and linking it under "the chain step didn't
+            // happen" would point at an earlier SUCCESS.
+            companion.tx.phase === 'pending' ||
+            companion.tx.phase === 'confirmed' ||
+            companion.tx.phase === 'reverted' ||
+            companion.tx.phase === 'lost'
+              ? companion.tx.explorerTxUrl
+              : null
+          }
           preflightMessage={seal.preflight.ok ? null : seal.preflight.message}
           saveErrorMessage={memory.save.error?.message ?? null}
           saveFundingRemedy={

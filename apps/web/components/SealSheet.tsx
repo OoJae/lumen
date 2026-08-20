@@ -145,6 +145,12 @@ export function SealSheet(props: SealSheetProps) {
 
   const twoStep = plan.kind === 'save-then-anchor';
   const uploadDone = phase !== 'idle' && phase !== 'saving' && phase !== 'save-failed';
+  /**
+   * What is still to pay. Once the upload has succeeded its line must go: it sat
+   * directly above the banner saying "That fee is spent", quoting a charge that
+   * had already happened as though it were still owed.
+   */
+  const remainingCost = uploadDone ? cost.lines.slice(-1) : cost.lines;
   const terminal = phase === 'sealed' || phase === 'already-sealed';
 
   const primaryLabel =
@@ -227,13 +233,13 @@ export function SealSheet(props: SealSheetProps) {
         {twoStep && !terminal && phase !== 'unavailable' && (
           <p className="mt-3 rounded-xl border border-border bg-canvas/40 p-3 text-xs leading-relaxed text-muted">
             Your wallet asks twice because 0G Storage and 0G Chain are two separate transactions.
-            There is no way to do it in one, and Lumen won&apos;t pretend otherwise.
+            Lumen has no way to make that one prompt, and won&apos;t pretend otherwise.
           </p>
         )}
 
-        {cost.lines.length > 0 && !terminal && phase !== 'unavailable' && (
+        {remainingCost.length > 0 && !terminal && phase !== 'unavailable' && (
           <div className="mt-3 rounded-xl border border-border bg-canvas/50 px-4 py-2">
-            {cost.lines.map((line) => (
+            {remainingCost.map((line) => (
               <div
                 key={line.label}
                 className="flex items-baseline justify-between gap-4 border-b border-border/60 py-2 last:border-0"
@@ -297,7 +303,10 @@ export function SealSheet(props: SealSheetProps) {
           </p>
         )}
 
-        {preflightMessage && phase === 'armed' && (
+        {preflightMessage && (phase === 'armed' || phase === 'anchor-failed') && (
+          // Also in 'anchor-failed': the retry button renders there, and
+          // seal.anchor() returns silently when preflight fails — the exact
+          // silent no-op anchorPreflight was written to make impossible.
           <p className="mt-3 text-sm text-caution">{preflightMessage}</p>
         )}
 

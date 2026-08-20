@@ -612,3 +612,60 @@ describe('INVARIANT: never re-upload once step 1 has succeeded', () => {
     expect(sealPrimaryAction('idle', plan({ companionState: 'synced', dirty: false }), false)).toBe('none');
   });
 });
+
+describe('the submitting step — no transaction exists yet', () => {
+  it('reads as anchoring, not as a failure', () => {
+    // useCompanion.anchor() awaits an RPC read BEFORE send() touches tx state.
+    // Without this step the reducer looked at the previous action's tx and
+    // reported 'unavailable', so every anchor flashed "Lumen stopped here —
+    // nothing was lost" while the wallet prompt was still being prepared.
+    expect(phaseOf({ step: 'submitting' }, { phase: 'idle', action: null })).toBe('anchoring');
+    expect(phaseOf({ step: 'submitting' }, { phase: 'confirmed', action: 'mint' })).toBe('anchoring');
+    expect(
+      phaseOf({ step: 'submitting' }, { phase: 'confirmed', action: 'anchor', anchoredRoot: ROOT_B }),
+    ).toBe('anchoring');
+  });
+
+  it('offers no primary action while submitting, so a second click cannot fire', () => {
+    expect(sealPrimaryAction('anchoring', plan({ dirty: true }), false)).toBe('none');
+  });
+
+  it('still discards a submitting run whose wallet changed', () => {
+    expect(
+      sealPhase({
+        run: run({ step: 'submitting' }),
+        receiptRoot: ROOT_A,
+        walletNow: '0xother',
+        tx: tx(),
+      }),
+    ).toBe('unavailable');
+  });
+});
+
+describe('the deletion headline only claims a snapshot that exists', () => {
+  const working = plan({ companionState: 'synced', dirty: true });
+
+  it('speaks of a sealed snapshot on the anchored-receipt basis', () => {
+    const n = sealNudge({
+      plan: working,
+      unsealed: { known: true, entries: 0, deletions: 2, basis: 'anchored-receipt' },
+      daysSinceLastSeal: null,
+      everSealed: true,
+      dismissed: false,
+    });
+    expect(n.headline).toContain('still in your sealed snapshot');
+  });
+
+  it('does NOT when nothing has ever been sealed', () => {
+    // On 'never-sealed' there is no sealed snapshot for them to be in, and
+    // `deletions` is the device's all-time count rather than a delta.
+    const n = sealNudge({
+      plan: working,
+      unsealed: { known: true, entries: 0, deletions: 2, basis: 'never-sealed' },
+      daysSinceLastSeal: null,
+      everSealed: false,
+      dismissed: false,
+    });
+    expect(n.headline).not.toContain('sealed snapshot');
+  });
+});

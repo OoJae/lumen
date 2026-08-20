@@ -252,7 +252,10 @@ export function sealNudge(input: SealNudgeInput): SealNudge {
   if (!unsealed.known) {
     // No baseline for a count. Say the true thing instead of a made-up number.
     headline = 'Your latest save isn’t sealed yet.';
-  } else if (unsealed.entries === 0 && unsealed.deletions > 0) {
+  } else if (unsealed.entries === 0 && unsealed.deletions > 0 && unsealed.basis === 'anchored-receipt') {
+    // Only on the anchored-receipt basis. On 'never-sealed' there IS no sealed
+    // snapshot for them to be in, and `deletions` is this device's all-time
+    // count rather than a delta — the sentence would be false twice over.
     headline = `${entriesWord(unsealed.deletions)} you deleted ${unsealed.deletions === 1 ? 'is' : 'are'} still in your sealed snapshot.`;
   } else if (everSealed === false) {
     // The one superlative this product permits anywhere is "first".
@@ -382,7 +385,22 @@ export function anchorPreflight(input: AnchorPreflightInput): AnchorPreflight {
 
 // ─── The run, and the phase reducer ─────────────────────────────────────────
 
-export type SealStep = 'save' | 'save-failed' | 'armed' | 'anchor';
+export type SealStep =
+  | 'save'
+  | 'save-failed'
+  | 'armed'
+  /**
+   * The click happened; the transaction does not exist yet.
+   *
+   * `useCompanion.anchor()` awaits a fresh `rootRead.refetch()` — a real RPC
+   * round-trip, with retries — BEFORE `send()` touches tx state. Without this
+   * step the reducer looked at whatever the LAST action left behind and
+   * reported 'unavailable': every anchor flashed "Lumen stopped here — nothing
+   * was lost" while the wallet prompt was still being prepared, and left the
+   * button live for a second click that would send a second transaction.
+   */
+  | 'submitting'
+  | 'anchor';
 
 export interface SealRun {
   /** FROZEN at start. The moment step 1 succeeds the LIVE plan becomes
@@ -434,6 +452,9 @@ export function sealPhase(input: SealPhaseInput): SealPhase {
 
   if (run.step === 'save') return 'saving';
   if (run.step === 'save-failed') return 'save-failed';
+
+  // Between the click and send(). No tx to read yet, and that is expected.
+  if (run.step === 'submitting') return 'anchoring';
 
   if (run.step === 'armed') {
     // The armed state is only meaningful while the receipt still matches what

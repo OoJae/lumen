@@ -162,7 +162,10 @@ export function MemoryStrip({
           <button
             type="button"
             onClick={() => void save.toZg().catch(() => {})}
-            disabled={save.state === 'saving'}
+            // Also disabled during a seal run: a save here would charge a second
+            // upload fee and move the receipt off run.savedRoot, voiding the fee
+            // already spent on step 1.
+            disabled={save.state === 'saving' || seal.resumable || seal.plan.blocked === 'busy'}
             className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90 disabled:opacity-50"
           >
             <CloudCheckIcon width={13} height={13} />
@@ -469,6 +472,36 @@ function CompanionBlock({
    * cases, so the button now disables itself.
    */
   const sealBlocked = seal.plan.kind === 'blocked';
+
+  /**
+   * 'diverged' keeps a DIRECT anchor, not the seal gate.
+   *
+   * sealPlan blocks 'diverged' on purpose — Lumen must not decide which root is
+   * newer — but routing this button through the gate removed the user's only
+   * way out of the fork and left a permanently greyed button with nothing
+   * explaining it. Deciding is the user's to make; Lumen just must not make it
+   * for them. Disabled only while something is actually in flight.
+   */
+  const divergedAnchor = guard.blocked ? (
+    <button
+      type="button"
+      onClick={() => void guard.switchToExpected()}
+      disabled={guard.status === 'switching'}
+      className="shrink-0 rounded-full border border-caution/50 bg-caution/10 px-3.5 py-1.5 text-xs font-medium text-caution hover:border-caution disabled:opacity-50"
+    >
+      {guard.status === 'switching' ? 'Check your wallet…' : `Switch to ${net.label} to anchor`}
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={() => void companion.anchor()}
+      disabled={seal.plan.blocked === 'busy'}
+      title="Anchors the snapshot on this device. Lumen can't tell which root is newer, so this is your call."
+      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90 disabled:opacity-50"
+    >
+      Anchor this device&apos;s save
+    </button>
+  );
   const sealInvite = (
     <button
       type="button"
@@ -478,6 +511,17 @@ function CompanionBlock({
       {seal.plan.steps === 2 ? 'Seal — 2 signatures' : 'Seal'}
     </button>
   );
+
+  /** A run that already cost money must always have a way back to the sheet. */
+  const resumeInvite = seal.resumable ? (
+    <button
+      type="button"
+      onClick={seal.begin}
+      className="shrink-0 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-[#fffdf8] hover:opacity-90"
+    >
+      Finish sealing
+    </button>
+  ) : null;
   const anchorAction = guard.blocked ? (
     <button
       type="button"
@@ -587,7 +631,7 @@ function CompanionBlock({
           tell which one is newer — it can only show you both.
         </>,
         <span className="flex shrink-0 gap-2">
-          {anchorAction}
+          {divergedAnchor}
           {restoreButton}
         </span>,
       );
@@ -647,6 +691,12 @@ function CompanionBlock({
       // otherwise renders nothing at all — and 'synced' with unsaved entries is
       // exactly the state where sealing is worth offering. `sealNudge` returns
       // 'none' for every blocked plan, so a clean journal still shows nothing.
+      if (resumeInvite) {
+        return shell(
+          <>A seal you started isn&apos;t finished. Reopen it to see where it got to.</>,
+          resumeInvite,
+        );
+      }
       if (seal.nudge.tier !== 'none' && seal.plan.kind !== 'blocked') {
         return shell(<>{seal.nudge.headline}</>, sealInvite);
       }

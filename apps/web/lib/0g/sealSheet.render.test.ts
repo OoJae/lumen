@@ -78,7 +78,17 @@ describe('the two signatures are named, not disguised', () => {
     expect(html).toContain('0G Storage');
     expect(html).toContain('0G Chain');
     expect(html).toContain('two separate transactions');
-    expect(html).toContain('Lumen won&#x27;t pretend otherwise');
+    expect(html).toContain('won&#x27;t pretend otherwise');
+  });
+
+  it('states the limit as Lumen\'s, not as a fact about the world', () => {
+    // The storage submit and the anchor are both ordinary EVM transactions from
+    // the same wallet to the same chain, so batching them is possible in
+    // principle (EIP-5792, a smart account, a multicall wrapper). What is true
+    // is that LUMEN cannot do it — claiming nobody could was an overclaim.
+    const html = render({ plan: TWO_STEP });
+    expect(html).not.toContain('There is no way to do it in one');
+    expect(html).toContain('Lumen has no way to make that one prompt');
   });
 
   it('says one signature for a one-step plan and does not mention an upload step', () => {

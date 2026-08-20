@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   anchorPreflight,
@@ -67,8 +67,12 @@ export interface Seal {
   /** Open the sheet without starting anything — the user sees the two-signature
    *  disclosure and the cost before any wallet prompt. */
   open: boolean;
+  /** A run that still owes work — every entry point offers to reopen it. */
+  resumable: boolean;
   begin(): void;
   close(): void;
+  /** Abandon an unresumable run. */
+  discard(): void;
   /** Step 1. Only reachable from 'idle' and 'save-failed'. */
   save(): Promise<void>;
   /** Step 2. Only reachable once the fresh receipt is in the rendered tree. */
@@ -85,10 +89,54 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
   const [run, setRun] = useState<SealRun | null>(null);
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const anchoringRef = useRef(false);
+
+  // A run belongs to one wallet. useJournalMemory wipes turns and the receipt on
+  // a switch; without this the run survived, and — back when `busy` counted it —
+  // killed sealing for the new wallet permanently.
+  const walletRef = useRef(memory.wallet);
+  useEffect(() => {
+    if (walletRef.current !== memory.wallet) {
+      walletRef.current = memory.wallet;
+      setRun(null);
+      setOpen(false);
+      anchoringRef.current = false;
+    }
+  }, [memory.wallet]);
+
+  /**
+   * The archive must be re-read on CONFIRMATION, not submission.
+   * `companion.anchor()` resolves as soon as it has a hash, so refetching there
+   * re-read the logs while the anchor was still unmined and cached a record
+   * missing the seal the user had just paid for — under a heading claiming it
+   * was read just now.
+   */
+  const lastConfirmed = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      companion.tx.phase === 'confirmed' &&
+      companion.tx.action === 'anchor' &&
+      companion.tx.hash &&
+      lastConfirmed.current !== companion.tx.hash
+    ) {
+      lastConfirmed.current = companion.tx.hash;
+      archive.refetch();
+    }
+  }, [companion.tx.phase, companion.tx.action, companion.tx.hash, archive]);
 
   const receiptRoot = memory.save.receipt?.rootHash ?? null;
   const txInFlight = companion.tx.phase === 'signing' || companion.tx.phase === 'pending';
-  const busy = memory.save.state === 'saving' || txInFlight || run !== null;
+  /**
+   * In-flight only. It deliberately does NOT count `run !== null`.
+   *
+   * It used to, and that single term was the root of a family of dead ends: a
+   * live run made the gate `blocked('busy')` forever, and every route back into
+   * the sheet is gated on that plan — so the save-retry button became a silent
+   * no-op, closing the sheet after a PAID upload locked the user out of step 2,
+   * and a wallet switch killed sealing for the session. Starting a second run
+   * is prevented by `resumable` below instead, which can also be resumed.
+   */
+  const busy = memory.save.state === 'saving' || txInFlight;
 
   const plan = sealPlan({
     companionState: companion.state,
@@ -143,8 +191,22 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
   const cost = useMemo(() => sealCost(activePlan, net.nativeCurrency.symbol), [activePlan, net]);
   const primaryAction = sealPrimaryAction(phase, activePlan, guard.blocked);
 
+  /**
+   * A run that still owes work. Every entry point offers to REOPEN this rather
+   * than to start something new — the upload may already be paid for.
+   */
+  const resumable =
+    run !== null && phase !== 'sealed' && phase !== 'already-sealed' && phase !== 'idle';
+
   function begin() {
+    // Reopens a stranded run as readily as it starts a new one.
     setOpen(true);
+  }
+
+  /** Throw the run away — the escape hatch when a run is unresumable. */
+  function discard() {
+    setRun(null);
+    setOpen(false);
   }
 
   function close() {
@@ -157,8 +219,12 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
   }
 
   async function save(): Promise<void> {
-    if (plan.kind === 'blocked') return;
-    const frozen = plan;
+    // Gate on the PHASE, not the live plan. Gating on the plan made this a
+    // silent no-op on every retry, because a live run blocked the plan — the
+    // exact anti-pattern anchorPreflight exists to prevent.
+    if (phase !== 'idle' && phase !== 'save-failed') return;
+    if (phase === 'idle' && plan.kind === 'blocked') return;
+    const frozen = run?.plan ?? plan;
     const wallet = memory.wallet;
     setRun({ plan: frozen, wallet, step: 'save', savedRoot: null, savedAt: null, seq: null });
     try {
@@ -187,21 +253,36 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
     // Mirrors useCompanion.anchor()'s guard, which returns SILENTLY — a user
     // who clicked and saw nothing happen would have no idea why.
     if (!preflight.ok) return;
+    // Re-entrancy guard. useCompanion.anchor() awaits an RPC read before it
+    // touches tx state, so without this a second click inside that window sent
+    // a SECOND transaction — two wallet prompts, and the loser reverts
+    // StaleAnchor for a real fee.
+    if (anchoringRef.current) return;
+    anchoringRef.current = true;
+
+    // 'submitting', not 'anchor': there is no transaction yet, and claiming one
+    // makes the reducer read the previous action's tx as this run's.
     setRun((prev) =>
       prev
-        ? { ...prev, step: 'anchor' }
+        ? { ...prev, step: 'submitting' }
         : {
             plan: activePlan,
             wallet: memory.wallet,
-            step: 'anchor',
+            step: 'submitting',
             // A one-step run anchors what is already on this device.
             savedRoot: receiptRoot,
             savedAt: memory.save.receipt?.savedAt ?? null,
             seq: memory.save.receipt?.seq ?? null,
           },
     );
-    await companion.anchor();
-    void archive.refetch();
+    try {
+      await companion.anchor();
+    } finally {
+      anchoringRef.current = false;
+      // The tx machine has now been touched either way — send() ran, or a
+      // pre-empt recorded a failure — so it is safe to let it drive the phase.
+      setRun((prev) => (prev && prev.step === 'submitting' ? { ...prev, step: 'anchor' } : prev));
+    }
   }
 
   async function switchChain(): Promise<void> {
@@ -220,8 +301,10 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
     archive,
     run,
     open,
+    resumable,
     begin,
     close,
+    discard,
     save,
     anchor,
     switchChain,

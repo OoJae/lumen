@@ -35,6 +35,14 @@ export function PracticeArchive({
   proofUrl: string | null;
   onClose: () => void;
 }) {
+  // Refetch on open. The hook lives in Journal with a 60s staleTime, so without
+  // this the modal could show an hour-old cache under a header claiming it was
+  // read just now — an easy claim to make true rather than soften.
+  const refetch = archive.refetch;
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -66,7 +74,9 @@ export function PracticeArchive({
         <div className="flex items-start justify-between gap-3 border-b border-border px-6 pb-4 pt-6">
           <div>
             <p className="font-serif text-lg leading-tight text-ink">Your practice archive</p>
-            <p className="text-xs text-muted">Read from {networkLabel} just now</p>
+            <p className="text-xs text-muted">
+              {status === 'loading' ? `Reading from ${networkLabel}…` : `Read from ${networkLabel}`}
+            </p>
           </div>
           <button
             type="button"
@@ -86,8 +96,9 @@ export function PracticeArchive({
           {status === 'error' && (
             <div className="text-sm leading-relaxed text-muted">
               <p>
-                Couldn&apos;t reach {networkLabel} to read your archive just now, so Lumen
-                isn&apos;t going to guess.
+                {archive.partial
+                  ? `Lumen could only read part of your history from ${networkLabel} — the contract reports more seals than the logs returned. Rather than show you a record it knows is incomplete, it's showing you nothing.`
+                  : `Couldn't reach ${networkLabel} to read your archive just now, so Lumen isn't going to guess.`}
               </p>
               <button
                 type="button"
@@ -108,6 +119,26 @@ export function PracticeArchive({
           {status === 'ok' && calendar && (
             <>
               <PracticeGrid calendar={calendar} />
+              {chain && chain.links.length > 0 && (
+                <p
+                  className={`mt-3 rounded-xl border px-4 py-2 text-xs leading-relaxed ${
+                    chain.intact
+                      ? 'border-accent/40 bg-accent-soft text-ink'
+                      : 'border-caution/40 bg-caution/10 text-caution'
+                  }`}
+                >
+                  {chain.intact ? (
+                    <>
+                      <b>Chain intact.</b> Every seal continues the previous root.
+                    </>
+                  ) : (
+                    <>
+                      <b>Chain broken at seal #{chain.brokenAtSeq}.</b> That anchor does not
+                      continue the previous root.
+                    </>
+                  )}
+                </p>
+              )}
               <p className="mt-3 text-sm text-ink">{practiceSummary(calendar)}</p>
               <p className="mt-1 text-xs leading-relaxed text-muted">
                 This is a record, not a score. Lumen doesn&apos;t count consecutive days,
@@ -182,7 +213,8 @@ export function PracticeArchive({
               Public proof ↗
             </a>
             <span className="ml-2 text-[11px] text-muted">
-              The same record, assembled the same way — anyone can open it, no wallet needed.
+              The same logs, the same reducer, the same grid — read there by a server instead of
+              this browser. Anyone can open it, no wallet needed.
             </span>
           </div>
         )}
