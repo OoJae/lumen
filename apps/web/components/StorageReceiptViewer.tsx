@@ -261,8 +261,9 @@ function AnchorSection({
         </span>
         <b className="font-medium text-ink">Proves:</b> this wallet — and only the owner may
         anchor — published this exact root to LumenCompanion on {net.label} at a specific block.
-        Each anchor is compare-and-swap, so every event names the root it replaced and the whole
-        history replays from the log with no gaps.{' '}
+        Every event names the root it replaced, so the whole history replays from the log with no
+        gaps and nothing can be inserted or reordered. Lumen anchors through the contract&apos;s
+        compare-and-swap call, so two of your devices can&apos;t silently clobber each other.{' '}
         <b className="font-medium text-ink">Doesn&apos;t prove:</b> that this is your newest
         snapshot. You can save without anchoring, and you can anchor an older root — the contract
         has no idea which is newer. A rollback becomes publicly <em>visible</em>; it does not become

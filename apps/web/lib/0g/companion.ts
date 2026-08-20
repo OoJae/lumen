@@ -113,8 +113,11 @@ export function namesToken(state: CompanionState): boolean {
  * for by the minter per byte — and the contract refuses a description change
  * that doesn't also move the root, so treat it as immutable.
  *
- * It is byte-identical for every Lumen companion on both networks: no address,
- * no timestamp, no entry count, no root. The metadata therefore distinguishes
+ * It is byte-identical for every companion minted THROUGH THE APP, on both
+ * networks: no address, no timestamp, no entry count, no root. (The
+ * description is a mint argument, not a contract constant, so a companion
+ * minted by other means can carry a different one — token #1 on each
+ * network, minted by contracts/scripts/smoke.ts, does.) The metadata therefore distinguishes
  * nobody, which is a real privacy property rather than an oversight. The root
  * lives in `dataHash`, where it belongs — embedding it here would become a
  * permanent lie after the first anchor.

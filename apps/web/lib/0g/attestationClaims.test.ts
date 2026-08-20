@@ -8,7 +8,7 @@ import manifest from '@/app/manifest';
 
 const OPTS = {
   model: 'glm-5.1',
-  inferencePath: 'direct-provider' as const,
+  inferencePath: 'gateway' as const,
   chatId: 'chat-1',
   providerAddress: '0xDB7B4653',
   disclosure: { providerType: 'TeeML', providerIdentity: '0xsigner' },

@@ -363,7 +363,9 @@ export default async function CompanionProofPage({
                 be back-dated.
               </li>
               {proof.chain.intact && proof.logAgrees ? (
-                <li>The pointer history is an unbroken, compare-and-swap chain.</li>
+                <li>
+                  The pointer history is an unbroken chain, and only the owner can extend it.
+                </li>
               ) : (
                 <li className="text-caution">
                   {proof.chain.intact

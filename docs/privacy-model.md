@@ -75,11 +75,27 @@ inference call.**
 
 **We therefore do _not_ claim full end-to-end-private inference in Waves 1–2.**
 
-### Wave 3+ — the trust-minimized path
-We move to the **Direct SDK with wallet-signed requests**, so the user authorizes
-inference themselves and the **gateway leaves the plaintext path**. Only then do we
-make the stronger claim — and it's a great demo beat: *"we removed ourselves from
-the loop."* This same change turns on per-request cryptographic verification.
+### Wave 3 — what actually shipped, and what didn't
+
+**Shipped: per-request cryptographic verification, in every user's browser.**
+This was expected to require the Direct SDK and a wallet-signed request. It
+didn't. The gateway became a verbatim byte pipe — it relays the provider's
+response bytes unaltered — and the browser fetches the enclave's signature,
+hashes exactly the bytes it received, recovers the signing address and compares
+it to the signer registered on-chain for that provider. A gateway that altered
+one token would fail that check in every user's browser. No wallet is needed, so
+this runs for signed-out visitors too.
+
+**Not shipped: removing the gateway from the plaintext path.** That still needs
+browser-direct, wallet-signed inference, which needs a funded inference wallet
+per user. It is designed and deferred to **Wave 4**. Until then the Waves 1–2
+boundary above stands **unchanged**: the gateway sees the prompt, and the prompt
+contains up to ten previously-stored entries in cleartext.
+
+So the honest Wave 3 sentence is *"you can now verify the enclave signed exactly
+what you read"* — **not** *"we removed ourselves from the loop."* Detection, not
+prevention. Earlier drafts of this section wrote the Wave 4 change as though it
+had already happened; it has not.
 
 ### Key management
 Wallet-signature-derived keys mean **losing the wallet = losing decryptable
@@ -91,14 +107,33 @@ powerful and never leaves the signing ceremony. We **never custody** either.
 **Determinism assumption (disclosed):** same wallet + same message ⇒ same
 signature ⇒ same key. True for RFC-6979 EOA wallets (MetaMask/Ledger class);
 NOT guaranteed for some smart-account/MPC wallets. A **key-check value (KCV)**
-is decrypted on every unlock — a mismatch surfaces a clear error state (and the
-recovery key restores access) instead of silently decrypting garbage.
-The KCV is only ever *created* by a signature unlock, never by a recovery-key
-unlock (a typo there would otherwise poison every future unlock), and the
-recovery-key **export is itself KCV-verified before it is shown** — if the
-wallet's fresh signature doesn't reproduce the journal's key, Lumen refuses to
-export and tells you to keep your existing backup rather than hand you a key
-that cannot decrypt anything.
+exists as a **cache**, and it is no longer the authority on what a correct key
+is — it never should have been. A KCV is a fixed constant encrypted with
+whatever key the last signature produced, verified against nothing, so treating
+it as authoritative meant a non-deterministic wallet's *wrong* first signature
+became the device's law and locked the *correct* recovery key out permanently.
+
+The authority is your own ciphertext. Every envelope is AES-GCM-bound to
+`lumen:v2:<keyVersion>:<typ>:<wallet>:<id>`, so **one successful authenticated
+decrypt is proof the key is this journal's key**, and a typo cannot forge it.
+Unlock therefore probes real data first and consults the KCV only when this
+device holds no ciphertext to ask — the fresh device, the new browser profile,
+the cleared site data. That case admits the key as **asserted** rather than
+proven, says so plainly in the UI rather than claiming a check it didn't
+perform, and promotes itself to proven the moment a restored snapshot decrypts,
+rewriting the KCV from proven material. Every branch lives in
+`apps/web/lib/crypto/keyTrust.ts` and is unit-tested cell by cell.
+
+The recovery-key **export is verified against the same authority before it is
+shown** — if the wallet's fresh signature doesn't reproduce the journal's key,
+Lumen refuses to export and tells you to keep your existing backup rather than
+hand you a key that cannot decrypt anything.
+
+The signature itself never enters any cache. Lumen calls `signMessage` from
+`wagmi/actions` rather than the `useSignMessage` hook, so no TanStack mutation —
+and therefore no five-minute retained copy of the signature or its derivation
+message — is ever created. `apps/web/lib/crypto/cacheAudit.ts` asserts this in
+development and fails loudly if a signing hook is reintroduced.
 
 ### Metadata
 Even when content is unreadable, **timing and size metadata** (e.g. response
@@ -174,9 +209,11 @@ what it exposes:
    KCV behavior above, in writing.
 8. **Minting is a public, permanent statement (W3).** The mint transaction puts
    on a public chain: your address, the block time, one 32-byte root hash, and
-   the token's label — a fixed `data:application/json` string that is
-   byte-for-byte identical for every Lumen companion, containing no address, no
-   timestamp and no entry count. Anyone can then see that this wallet owns a
+   the token's label — a fixed `data:application/json` string, identical for
+   every companion minted through the app, containing no address, no timestamp
+   and no entry count. (The label is a mint argument, so a companion minted by
+   other means can carry a different one; token #1 on each network, minted by
+   `contracts/scripts/smoke.ts`, does.) Anyone can then see that this wallet owns a
    Lumen companion and every root it has ever anchored — a public count and
    cadence of the moments you chose to anchor. The content stays unreadable. One
    companion per wallet is enforced on-chain and the token cannot be
@@ -245,12 +282,21 @@ Anchoring writes one 32-byte root hash into `LumenCompanion`
 - **An attributed, timestamped commitment.** Your address — nobody else's, since
   only the token owner may anchor — published this exact root at this block. A
   third party can check that without taking Lumen's word for anything.
-- **An unforkable public history.** `anchorMemoryRoot` is compare-and-swap: the
-  call carries the root it expects to replace, so every
+- **An unbroken public history that only you can extend.** Every
   `MemoryRootAnchored(tokenId, seq, prevRoot, newRoot)` event links to the one
-  before it. Your pointer's whole history replays from the logs with no gaps,
-  and `anchorCount` says how many links there should be. Nothing can be inserted
-  in the middle and nothing can be replaced quietly.
+  before it, because the contract always writes `prevRoot = current`. Your
+  pointer's whole history replays from the logs with no gaps, `anchorCount` says
+  how many links there should be, and nothing can be inserted in the middle or
+  reordered. Both writers are owner-only, so nobody else can extend it.
+
+  **The precise limit.** `anchorMemoryRoot` — the only call the app makes — is
+  compare-and-swap: it carries the root it expects to replace and reverts if
+  that is stale, so two devices cannot silently clobber each other. But the
+  contract also exposes `update`, the 0G reference-implementation alias, which
+  performs no such check and emits a **byte-identical** event. So a replayer can
+  prove the chain is unbroken; it cannot prove every link was compare-and-swapped
+  by an owner who knew the prior root. `contracts/README.md` has the full
+  table.
 - **A public witness for the off-chain chain.** A snapshot's `prevRootHash`
   chain used to be evident only to whoever held the snapshots. "This root
   existed by this block" is now witnessed by the network.

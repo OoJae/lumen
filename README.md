@@ -87,7 +87,10 @@ you sign.**
   honest about why.
 - ✅ **Anchor = compare-and-swap.** `anchorMemoryRoot(tokenId, newRoot, expectedPrevRoot)`
   means two devices can't silently clobber each other, and the `MemoryRootAnchored`
-  log is a verifiable `prevRoot → newRoot` chain.
+  log is a verifiable `prevRoot → newRoot` chain. What the log proves is that the
+  chain is unbroken and owner-only; it does not prove every link went through the
+  CAS path, because the ERC-7857 `update` alias emits an identical event without
+  one. [`contracts/README.md`](contracts/README.md) has the divergence table.
 - ✅ **One network per build**, with a chain guard, per-network memory pointers and
   a permanent network badge — you can always see which chain you're on.
 - ✅ **Zero admin keys.** No owner, no pause, no upgrade path, no way for us to move
@@ -234,8 +237,10 @@ plaintext path entirely (wallet-signed browser-direct inference) needs a funded
 inference wallet per user and is **Wave 4**.
 
 There is exactly **one** mock in this codebase: with no Compute credential
-configured, local dev serves a loudly-labelled demo reflection. It cannot run in
-production, and it is *not* a failure fallback — when a credential is configured
+configured, local dev serves a loudly-labelled demo reflection. A production
+deploy in that state answers **503** instead — enforced by `mayServeDemo()` in
+[`apps/web/lib/0g/env.ts`](apps/web/lib/0g/env.ts), not merely asserted here.
+It is *not* a failure fallback — when a credential is configured
 and the provider is unreachable, Lumen returns an error. It will never invent a
 reflection and let you believe something read you.
 

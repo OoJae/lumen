@@ -263,7 +263,7 @@ export function MintCompanionSheet({
                 What this puts on a public chain — honestly
               </span>
               Your address, the time you minted, one 32-byte root hash, and a fixed public label
-              that is byte-for-byte identical for every Lumen companion. Anyone can then see that
+              that is the same for every companion minted here. Anyone can then see that
               this wallet owns a Lumen companion and which snapshot it points at. Nobody can read
               the snapshot. Anchoring proves you committed to this root at this time — it does not
               prove the root is your newest one. One companion per wallet is permanent, so if you

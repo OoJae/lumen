@@ -16,11 +16,11 @@
  * plaintext path entirely) is Wave 4 work and is NOT implemented; nothing here
  * bypasses this route today.
  *
- * There is exactly one mock path and it cannot reach production: with no
- * Compute credential configured (local dev), the route serves a clearly-labeled
- * demo stream. When a credential IS configured, a provider failure returns an
- * honest error — Lumen never fabricates a reflection and lets you believe
- * something read you.
+ * There is exactly one mock path, and production refuses to serve it. With no
+ * Compute credential configured, local dev streams a clearly-labeled demo;
+ * a production deploy in the same state answers 503. When a credential IS
+ * configured, a provider failure returns an honest error. Lumen never
+ * fabricates a reflection and lets you believe something read you.
  */
 import type { NextRequest } from 'next/server';
 import {
@@ -29,7 +29,7 @@ import {
   reflectDemo,
   reflectRawResponse,
 } from '@/lib/0g/compute';
-import { isComputeLive } from '@/lib/0g/env';
+import { isComputeLive, mayServeDemo } from '@/lib/0g/env';
 import { clientKey, createRateLimiter } from '@/lib/0g/rateLimit';
 import { LUMEN_SYSTEM_PROMPT } from '@/lib/prompts';
 import { foldSystemMessages } from '@/lib/memory/systemMerge';
@@ -68,8 +68,9 @@ function sse(event: string | null, data: unknown): Uint8Array {
   return encoder.encode(`${event ? `event: ${event}\n` : ''}data: ${payload}\n\n`);
 }
 
-/** Local-dev only: no Compute credential configured. Unreachable in production,
- *  where the credential is always present. */
+/** Local-dev only: no Compute credential configured. Unreachable in production
+ *  because `mayServeDemo()` refuses there — not because we assume the
+ *  credential is always present. It once was exactly that assumption. */
 function demoStream(messages: ChatMessage[]): Response {
   const result = reflectDemo(messages);
   const stream = new ReadableStream<Uint8Array>({
@@ -126,7 +127,21 @@ export async function POST(req: NextRequest): Promise<Response> {
     return new Response('That reflection is too long to send', { status: 413 });
   }
 
-  if (!isComputeLive()) return demoStream(messages);
+  if (!isComputeLive()) {
+    // The one mock in this codebase, and it is now genuinely unreachable in
+    // production rather than merely documented as such. See lib/0g/env.ts.
+    if (!mayServeDemo()) {
+      return Response.json(
+        {
+          error:
+            'Lumen is not configured for inference right now. No reflection was generated — ' +
+            'nothing was invented in its place.',
+        },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+    return demoStream(messages);
+  }
 
   const withSystem = foldSystemMessages(messages, LUMEN_SYSTEM_PROMPT);
 
