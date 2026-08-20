@@ -107,11 +107,23 @@ export function buildLiveAttestation(
 export function buildVerifiedAttestation(
   opts: LiveAttestationOptions,
   proof: TeeProofRecord,
+  /** Whether the provider has acknowledged the signer we checked against. */
+  signerAcknowledged?: boolean,
 ): AttestationInfo {
+  // The signature check is the same either way — what changes is what we are
+  // entitled to say about the address we checked it against. An unacknowledged
+  // signer means the registry entry has not been confirmed by the provider, so
+  // "verified" needs the caveat rather than swallowing it.
+  const caveat =
+    signerAcknowledged === false
+      ? ' Note: this provider has not acknowledged the TEE signer registered against it on-chain, ' +
+        'so the address we checked the signature against is the registry\u2019s claim rather than ' +
+        'a confirmed one.'
+      : '';
   return {
     ...buildLiveAttestation(opts),
     verificationStatus: 'verified',
-    note: buildVerifiedNote(opts.disclosure),
+    note: buildVerifiedNote(opts.disclosure) + caveat,
     proof,
   };
 }

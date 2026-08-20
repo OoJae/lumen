@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+import { useModalFocus } from '@/lib/hooks/useModalFocus';
+
 import { shortRoot } from '@/lib/0g/anchorHistory';
 import type { SealAction, SealCost, SealPhase, SealPlan, UnsealedCount } from '@/lib/0g/seal';
 import type { FundingRemedy as Remedy } from '@/lib/storage/saveErrorCopy';
@@ -168,6 +170,8 @@ export function SealSheet(props: SealSheetProps) {
               : 'Point your companion'
             : '';
 
+  const panelRef = useModalFocus<HTMLDivElement>();
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -178,6 +182,7 @@ export function SealSheet(props: SealSheetProps) {
     >
       <div
         className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-border bg-surface p-6 shadow-2xl sm:rounded-3xl"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-3">

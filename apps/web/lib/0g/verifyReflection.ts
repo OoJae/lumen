@@ -25,6 +25,16 @@ export interface TeeSignerInfo {
   providerUrl: string;
   model: string;
   disclosure: ProviderDisclosure;
+  /**
+   * Has the provider ACKNOWLEDGED the TEE signer registered against it?
+   *
+   * /api/tee-signer has always read and returned this, and this interface used
+   * to omit it — so it was fetched, serialised, and dropped. A provider whose
+   * registered signer was never acknowledged verified identically to one whose
+   * was, under the label "Cryptographically verified". Carried through now, and
+   * disclosed by the attestation note rather than silently ignored.
+   */
+  teeSignerAcknowledged?: boolean;
 }
 
 let signerCache: { value: TeeSignerInfo; at: number } | null = null;
@@ -102,6 +112,7 @@ export async function verifyAndBuildAttestation(
       signature: proof.signature,
       signingAddress: proof.signingAddress,
       teeSignerAddress: signer.teeSignerAddress,
+      recovered: verdict.recovered,
       responseSha256: verdict.computedResponseSha256,
       verifiedAt: new Date().toISOString(),
       checks: verdict.checks,
@@ -113,7 +124,8 @@ export async function verifyAndBuildAttestation(
       : signer.disclosure;
     const withSigned = { ...opts, disclosure: signed };
 
-    if (verdict.ok) return buildVerifiedAttestation(withSigned, record);
+    if (verdict.ok)
+      return buildVerifiedAttestation(withSigned, record, signer.teeSignerAcknowledged);
 
     // A signature that exists but does not match the bytes is an alarm, not a
     // shrug. Anything softer would be exactly the overclaiming we refuse.
@@ -124,24 +136,4 @@ export async function verifyAndBuildAttestation(
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** Re-check a persisted proof — works offline-of-the-provider, forever. */
-export async function recheckPersistedProof(
-  proof: TeeProofRecord,
-  rawBytesSha256: string,
-): Promise<{ signature: boolean; responseHash: boolean }> {
-  const verdict = await verifyTeeProof(
-    {
-      text: proof.signedText,
-      signature: proof.signature as `0x${string}`,
-      signingAddress: proof.signingAddress,
-    },
-    new Uint8Array(),
-    proof.teeSignerAddress,
-  );
-  return {
-    signature: verdict.checks.signature,
-    responseHash: verdict.parsed?.responseHash === rawBytesSha256,
-  };
 }

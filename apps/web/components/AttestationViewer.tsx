@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+
+import { useModalFocus } from '@/lib/hooks/useModalFocus';
 import type { AttestationInfo } from '@lumen/shared';
 import { SEALED_INFERENCE_URL } from '@lumen/shared';
 import { statusPresentation } from '@/lib/0g/attestation';
@@ -42,6 +44,8 @@ export function AttestationViewer({
   const proof = attestation.proof;
   const when = new Date(attestation.timestamp).toLocaleString();
 
+  const panelRef = useModalFocus<HTMLDivElement>();
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -52,6 +56,7 @@ export function AttestationViewer({
     >
       <div
         className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-border bg-surface p-6 shadow-2xl sm:rounded-3xl"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between">
@@ -123,8 +128,16 @@ export function AttestationViewer({
               label="Response hash"
               value={proof.checks.responseHash ? 'matches these bytes ✓' : 'DOES NOT MATCH ✕'}
             />
+            {/* The derivation itself, not a verdict about it. Recovering this
+                address from the signature and finding it equal to the on-chain
+                one IS the proof — showing only a checkmark asked for trust
+                exactly where evidence was promised. */}
+            {proof.recovered && (
+              <Field label="Recovered from signature" value={proof.recovered} mono />
+            )}
             <Field label="TEE signer (on-chain)" value={proof.teeSignerAddress} mono />
             <Field label="SHA-256 of response" value={proof.responseSha256} mono />
+            <Field label="Signature" value={proof.signature} mono />
             <Field label="Verified at" value={new Date(proof.verifiedAt).toLocaleString()} />
           </div>
         )}

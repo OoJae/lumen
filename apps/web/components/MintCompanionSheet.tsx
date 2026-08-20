@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+import { useModalFocus } from '@/lib/hooks/useModalFocus';
+
 import { shortRoot, TYPICAL_MINT_COST } from '@/lib/0g/companion';
 import { activeNetwork } from '@/lib/0g/network';
 import type { Companion } from '@/lib/hooks/useCompanion';
@@ -67,6 +69,8 @@ export function MintCompanionSheet({
   const busy = tx.phase === 'signing' || tx.phase === 'pending';
   const done = tx.phase === 'confirmed' && tx.mintedTokenId !== null;
 
+  const panelRef = useModalFocus<HTMLDivElement>();
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -77,6 +81,7 @@ export function MintCompanionSheet({
     >
       <div
         className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-border bg-surface p-6 shadow-2xl sm:rounded-3xl"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Closing while a mint is in flight is allowed — the chip keeps

@@ -4,6 +4,8 @@ import { exportTrustNotice } from '@/lib/crypto/unlockCopy';
 import type { KeyTrust } from '@/lib/crypto/keyTrust';
 import { useEffect, useState } from 'react';
 
+import { useModalFocus } from '@/lib/hooks/useModalFocus';
+
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { CloseIcon, KeyIcon } from './icons';
 
@@ -74,6 +76,8 @@ export function RecoveryKeyModal({
     URL.revokeObjectURL(url);
   }
 
+  const panelRef = useModalFocus<HTMLDivElement>();
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -84,6 +88,7 @@ export function RecoveryKeyModal({
     >
       <div
         className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-border bg-surface p-6 shadow-2xl sm:rounded-3xl"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between">

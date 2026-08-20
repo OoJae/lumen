@@ -7,6 +7,16 @@ export const metadata: Metadata = {
   description:
     'A private, user-owned AI journaling companion built on 0G. Every reflection runs inside a hardware TEE — the provider cannot read your words, and you can verify it.',
   applicationName: 'Lumen',
+  // iOS ignores the manifest's icons entirely and reads this link instead;
+  // without it, "Add to Home Screen" renders a screenshot of the page.
+  icons: {
+    icon: [
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+  appleWebApp: { capable: true, title: 'Lumen', statusBarStyle: 'default' },
 };
 
 export const viewport: Viewport = {

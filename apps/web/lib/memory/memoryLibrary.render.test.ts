@@ -115,7 +115,7 @@ describe('MemoryLibrary renders', () => {
     expect(html).toContain('Markdown');
     expect(html).toContain('JSON');
     expect(html).toContain('the way you would a paper journal');
-    expect(html).toContain('re-verified later');
+    expect(html).toContain('the evidence Lumen checked');
   });
 
   it('offers no export for an empty journal', () => {

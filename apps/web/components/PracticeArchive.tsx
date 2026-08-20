@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+import { useModalFocus } from '@/lib/hooks/useModalFocus';
+
 import { shortRoot, utcDay, type AnchorLink } from '@/lib/0g/anchorHistory';
 import { longDate, practiceSummary } from '@/lib/0g/practice';
 import type { AnchorArchive } from '@/lib/hooks/useAnchorArchive';
@@ -59,6 +61,8 @@ export function PracticeArchive({
   // Newest first: the log is a record you scan backwards from now.
   const links: AnchorLink[] = chain ? [...chain.links].reverse() : [];
 
+  const panelRef = useModalFocus<HTMLDivElement>();
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -69,6 +73,7 @@ export function PracticeArchive({
     >
       <div
         className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-surface shadow-2xl sm:rounded-3xl"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-6 pb-4 pt-6">

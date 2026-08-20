@@ -156,7 +156,7 @@ describe('bundle', () => {
     expect(parsed.entries[0]!.entry).toBe('First thing I wrote.');
   });
 
-  it('preserves the attestation proof so a reflection can be re-verified later', () => {
+  it('preserves the attestation proof, so the evidence outlives Lumen', () => {
     const i = input({
       turns: [{ ...turn('a', 'e', '2026-08-01T10:00:00.000Z'), attestation: ATTESTATION }],
     });

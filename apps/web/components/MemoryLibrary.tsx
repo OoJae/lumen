@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useModalFocus } from '@/lib/hooks/useModalFocus';
+
 import { embed, isEmbedderReady } from '@/lib/memory/embeddings';
 import { resurface, type Resurfaced } from '@/lib/memory/resurface';
 import { searchTurns, type SearchHit, type SearchResults } from '@/lib/memory/search';
@@ -155,14 +157,12 @@ export function MemoryLibrary({
   const inputRef = useRef<HTMLInputElement>(null);
   const runId = useRef(0);
 
-  // Mount-only. Kept apart from the Escape handler because `onClose` is an
-  // inline arrow in the parent and so changes identity every render — and
-  // Journal re-renders on every settled backfill embed. Bundled together, this
-  // effect re-ran dozens of times while the library was open, yanking focus back
-  // into the search box each time.
+  // Mount-only, and no longer focuses anything itself — useModalFocus owns
+  // that, and does it once. Kept apart from the Escape handler because
+  // `onClose` is an inline arrow in the parent, so bundling them re-ran this
+  // on every render and yanked focus back into the search box each time.
   useEffect(() => {
     document.body.style.overflow = 'hidden';
-    inputRef.current?.focus();
     return () => {
       document.body.style.overflow = '';
     };
@@ -261,6 +261,8 @@ export function MemoryLibrary({
   const searching = Boolean(results);
   const nothingFound = searching && results!.exact.length === 0 && results!.related.length === 0;
 
+  const panelRef = useModalFocus<HTMLDivElement>({ preferred: inputRef });
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -271,6 +273,7 @@ export function MemoryLibrary({
     >
       <div
         className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-surface shadow-2xl sm:rounded-3xl"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-6 pb-4 pt-6">
@@ -378,8 +381,9 @@ export function MemoryLibrary({
             {exportError && <span className="w-full text-xs text-caution">{exportError}</span>}
             <span className="w-full text-[11px] leading-relaxed text-muted">
               Everything, unencrypted, in formats that outlive Lumen. The JSON keeps each
-              reflection&apos;s enclave proof so it can be re-verified later. Store the file the way
-              you would a paper journal.
+              reflection&apos;s enclave proof — the signature, the signer, and the hash the
+              enclave signed — so you keep the evidence Lumen checked, even if Lumen is gone.
+              Store the file the way you would a paper journal.
             </span>
           </div>
         )}

@@ -42,6 +42,15 @@ export interface TeeProofRecord {
   signingAddress: string;
   /** Signer read from the on-chain registry — what we actually checked against. */
   teeSignerAddress: string;
+  /**
+   * The address RECOVERED from the signature over `signedText`.
+   *
+   * This is the derivation the whole proof rests on: recovering it and finding
+   * it equal to `teeSignerAddress` is what "cryptographically verified" means.
+   * It used to be computed and thrown away, so the viewer could only show a
+   * checkmark — asking for trust exactly where evidence was promised.
+   */
+  recovered?: string;
   /** SHA-256 we computed locally over the exact bytes received. */
   responseSha256: string;
   verifiedAt: string; // ISO-8601
