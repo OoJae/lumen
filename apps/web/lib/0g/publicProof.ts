@@ -21,7 +21,7 @@ import {
 
 import { activeChain } from './chain';
 import { activeNetwork } from './network';
-import { buildAnchorChain, type AnchorChain } from './anchorHistory';
+import { agreesWithContract, buildAnchorChain, type AnchorChain } from './anchorHistory';
 import { readAnchorLogs } from './anchorLogs';
 
 /** A slow RPC must not hang the page — a partial proof beats a spinner. */
@@ -195,13 +195,13 @@ async function readCompanionProof(address: Address): Promise<CompanionProof> {
     latestRoot,
     anchorCount,
     chain,
-    logAgrees: latestRoot ? sameHex(chain.latestRoot, latestRoot) : true,
+    // agreesWithContract, not an inline compare: when the latestMemoryRoot read
+    // FAILS, latestRoot is null and the inline version returned `true`
+    // unconditionally — printing an "unbroken chain" verdict the page had not
+    // earned. The tested helper requires the chain to be empty in that case.
+    logAgrees: agreesWithContract(chain, latestRoot),
     storage,
   };
 }
 
-function sameHex(a: string | null, b: string | null): boolean {
-  if (!a || !b) return false;
-  return a.toLowerCase() === b.toLowerCase();
-}
 

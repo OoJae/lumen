@@ -9,6 +9,7 @@
  * logged. The transcript is returned to the composer for the user to
  * review/edit BEFORE it is ever reflected on.
  */
+import { clientKey, createRateLimiter } from '@/lib/0g/rateLimit';
 import { NextRequest } from 'next/server';
 import type { TranscribeResponse } from '@lumen/shared';
 import { transcribeAudio } from '@/lib/0g/compute';
@@ -24,7 +25,18 @@ const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 /** Multipart framing overhead allowance on top of the audio cap. */
 const MAX_BODY_BYTES = MAX_AUDIO_BYTES + 64 * 1024;
 
+/** Whisper is billed per clip; same reasoning as the reflect route. */
+const limiter = createRateLimiter({ burst: 10, refillPerSecond: 1 / 12 });
+
 export async function POST(req: NextRequest): Promise<Response> {
+  const limit = limiter(clientKey(req.headers));
+  if (!limit.allowed) {
+    return new Response('Too many transcriptions from this address in a short time.', {
+      status: 429,
+      headers: { 'Retry-After': String(limit.retryAfterSeconds) },
+    });
+  }
+
   if (!isVoiceLive()) {
     return Response.json(
       {

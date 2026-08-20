@@ -141,7 +141,7 @@ export function AttestationViewer({
                 provider registered on-chain. Nothing between the enclave and this device altered
                 the response — not the network, not Lumen&apos;s gateway.{' '}
                 {attestation.inferencePath === 'gateway' &&
-                  'The gateway still relays the request itself, so it sees the prompt for the duration of the call; it stores nothing and logs nothing. '}
+                  'The gateway still relays the request itself, so for the duration of the call it sees the prompt — which includes your recent entries and any older ones your companion recalled, in plaintext. It stores nothing and logs nothing, and it cannot read anything at rest. '}
                 What is <em>not</em> proven: the request digest in the signed statement (we display
                 it but have not confirmed how the provider derives it), so we make no claim that
                 your prompt is cryptographically bound to this response.

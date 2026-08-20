@@ -2,7 +2,9 @@
  * 0G Storage seam (Wave 2) — CLIENT-SIDE, user-signed.
  *
  * Uploads are signed and paid by the USER's wallet in-browser; Lumen holds no
- * storage key and is not in the storage path at all. Only ciphertext (envelope
+ * storage key. It DOES relay the encrypted bytes, because 0G's nodes are
+ * HTTP-only and an HTTPS page cannot reach them (see lib/0g/nodeProxy.ts) —
+ * "not in the storage path at all" would be false. Only ciphertext (envelope
  * v2) ever reaches this module — encryption happens in lib/storage/snapshot.ts
  * before these functions are called.
  *

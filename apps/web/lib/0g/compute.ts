@@ -12,9 +12,12 @@
  *  - ROUTER path: a dashboard `sk-` key against the hosted Router
  *    (`ZG_ROUTER_BASE_URL`), which load-balances across healthy providers.
  *    Selected automatically when `ZG_PROVIDER_URL` is unset.
- *  - DEMO: no token → a clearly-labeled mock so the loop is always clickable. The
- *    route also falls back to demo (labeled "live unavailable") if a live call
- *    times out, so a provider outage never hangs the UI.
+ *  - DEMO: no token → a clearly-labeled mock so the loop is always clickable in
+ *    local dev. It is the ONLY mock, and it is unreachable in production, where
+ *    a credential is always configured. There is deliberately no fallback to it
+ *    on a live failure: a provider outage returns an honest error, because a
+ *    journaling app that invents a reflection is lying to someone who just
+ *    wrote something true.
  *
  * Wave 3 swaps the DIRECT internals to the full broker SDK (per-request
  * `processResponse` crypto-verification) with no caller change.

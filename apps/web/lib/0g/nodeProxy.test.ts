@@ -72,3 +72,45 @@ describe('rewriteNodeUrls', () => {
     expect(rewriteNodeUrls(payload, origin).a[0]!.b.url).toBe(`${origin}/api/zg/node/34.1.2.3`);
   });
 });
+
+describe('SSRF: a host may not smuggle a different destination', () => {
+  it('rejects delimiters that end the authority before the .0g.ai suffix', () => {
+    // Every one of these passed the old suffix check and connected elsewhere —
+    // the third reaches the cloud metadata endpoint.
+    for (const evil of [
+      'evil.com#.0g.ai',
+      'evil.com?.0g.ai',
+      'evil.com/.0g.ai',
+      '127.0.0.1#.0g.ai',
+      '169.254.169.254#.0g.ai',
+      'user@evil.com#.0g.ai',
+      'evil.com:80#.0g.ai',
+      'evil.com\\\\.0g.ai',
+      'evil.com .0g.ai',
+    ]) {
+      expect(isAllowedNodeHost(evil), evil).toBe(false);
+    }
+  });
+
+  it('still accepts genuine node hosts', () => {
+    expect(isAllowedNodeHost('indexer-storage-turbo.0g.ai')).toBe(true);
+    expect(isAllowedNodeHost('34.66.131.173')).toBe(true);
+  });
+
+  it('rejects malformed hostnames', () => {
+    for (const bad of ['', '.', '..', '.0g.ai', 'a..b.0g.ai', '-bad.0g.ai', 'bad-.0g.ai', 'a'.repeat(64) + '.0g.ai']) {
+      expect(isAllowedNodeHost(bad), JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('blocks the special-use ranges the original guard missed', () => {
+    for (const ip of ['100.64.0.1', '100.127.255.254', '192.0.0.1', '198.18.0.1', '198.19.255.255']) {
+      expect(isAllowedNodeHost(ip), ip).toBe(false);
+    }
+  });
+
+  it('nodeTargetUrl refuses to build a URL that resolves elsewhere', () => {
+    expect(nodeTargetUrl('34.66.131.173')).toBe('http://34.66.131.173:5678');
+    expect(() => nodeTargetUrl('evil.com#.0g.ai')).toThrow(/does not parse as its own hostname/);
+  });
+});

@@ -10,7 +10,9 @@ export function JournalComposer({
   voiceLive = false,
   placeholder = 'Write something…',
 }: {
-  onSubmit: (entry: string) => void;
+  /** Resolves true when the entry was accepted and may be cleared. Resolving
+   *  false (or throwing) keeps the words in the box — see submit(). */
+  onSubmit: (entry: string) => boolean | Promise<boolean>;
   disabled?: boolean;
   voiceLive?: boolean;
   placeholder?: string;
@@ -23,10 +25,25 @@ export function JournalComposer({
     ref.current?.focus();
   }
 
-  function submit() {
+  /**
+   * Clear ONLY once the entry is safely somewhere else.
+   *
+   * This used to clear immediately, while `addTurn` runs only after a
+   * successful reflection — so if the provider was unreachable, the words the
+   * person had just written were gone from the box and stored nowhere. In a
+   * journal that is the worst possible failure, and it was happening behind an
+   * error message that claimed the entry had been saved locally.
+   */
+  async function submit() {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    onSubmit(trimmed);
+    let accepted = false;
+    try {
+      accepted = await onSubmit(trimmed);
+    } catch {
+      accepted = false;
+    }
+    if (!accepted) return;
     setValue('');
     if (ref.current) ref.current.style.height = 'auto';
   }
@@ -34,7 +51,7 @@ export function JournalComposer({
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      submit();
+      void submit();
     }
   }
 
@@ -70,7 +87,7 @@ export function JournalComposer({
         </span>
         <button
           type="button"
-          onClick={submit}
+          onClick={() => void submit()}
           disabled={disabled || value.trim().length === 0}
           className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-[#fffdf8] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >

@@ -22,17 +22,26 @@ TEE"** and the reflection is a local mock. We never dress a mock up as real.
 ## The guarantees (by wave)
 
 1. **Confidentiality during inference (W1+).** 0G Sealed Inference processes the
-   prompt inside a hardware TEE; the GPU/model provider cannot read it; the
-   response is signed inside the enclave.
+   prompt inside a hardware TEE and signs the response there. What that means
+   depends on the provider, and the app reports the difference per provider from
+   the on-chain registry rather than averaging over it: our live provider runs
+   the model at an **upstream host**, with the enclave acting as a *sealed proxy*
+   that attests the request, the response and its TLS session to that host. So
+   the provider's own operator cannot read your words, and the upstream model
+   host does process them inside that attested session. "The model runs inside
+   the enclave" would be the stronger claim, and it is not the one we can make.
 2. **Confidentiality of stored data (W2+).** Every entry/reflection is encrypted
    **client-side** with AES-GCM *before* it leaves the device. The key is derived
    from a **wallet signature** (deterministic, never transmitted). Storage nodes —
    and Lumen — only ever see ciphertext. *(Shipped in Wave 2: envelope-v2 AAD-bound
    encryption, ciphertext-only IndexedDB, user-signed snapshot uploads to the 0G
    Log layer.)*
-3. **Ownership (W3+).** The companion + memory pointer is an **ERC-7857 INFT** the
-   user holds; export/transfer is user-controlled; transfers re-encrypt via the
-   TEE oracle.
+3. **Ownership (W3+).** The companion + memory pointer is an **ERC-7857 INFT**
+   the user holds. Export is user-controlled and shipped (Markdown + JSON).
+   **Transfer is not.** ERC-7857 transfers must re-encrypt the memory to the new
+   owner through a TEE oracle, no such oracle is live on 0G, and the deployed
+   contract therefore makes every transfer path revert. Companions are soulbound
+   until that changes; nothing here should be read as promising otherwise.
 
 ## The honest threat model
 
@@ -45,8 +54,23 @@ inference call.**
 **Mitigations:**
 - The gateway holds **no long-term plaintext** and **logs no entry/reflection
   content**.
-- All *stored* data is end-to-end-encrypted client-side (from W2) — the gateway
-  never sees stored memory, only the transient prompt for the live call.
+- All *stored* data is end-to-end-encrypted **at rest** (from W2): on this
+  device, on 0G Storage nodes, and on the chain, Lumen sees only ciphertext.
+- **But the prompt for a live call CONTAINS stored memory, in plaintext, and
+  the gateway sees it.** This deserves stating plainly, because an earlier
+  version of this document said the opposite. Every reflection sends: your new
+  entry, the **last 6 entries and their reflections** (the session window,
+  `lib/memory/session.ts`), and up to **4 more entries selected by on-device
+  recall** — which may be from any point in your history, including entries
+  restored from a 0G snapshot months later. So on a routine reflection the
+  gateway receives up to ten previously-stored journal entries as cleartext.
+  You can see this yourself: DevTools → Network → `/api/reflect` → Payload.
+- What that does *not* mean: the gateway keeps none of it, logs no content, and
+  cannot read anything at rest. What it does mean: for the duration of an
+  inference call, "encrypted end-to-end" describes storage, not the prompt.
+- Removing the gateway from that path needs browser-direct, wallet-signed
+  inference. It is designed and not shipped. Until it is, this is the honest
+  boundary of the claim.
 - This limitation is **labeled in-app** (the attestation viewer) and here.
 
 **We therefore do _not_ claim full end-to-end-private inference in Waves 1–2.**
@@ -264,11 +288,13 @@ and the app's copy follows this document, not the comment.*
 - **W1:** "Processed inside an attested TEE in private trust mode; provider
   can't read it; here's the proof reference." Gateway in plaintext path —
   disclosed.
-- **W2:** + "Your stored memory is encrypted on your device before it
-  ever leaves; storage nodes, the chain, and Lumen see only ciphertext; your
-  wallet — not ours — is the on-chain owner of every upload." Disclosed: the
-  gateway remains in the plaintext path for the inference/transcription call;
-  save timing and bucketed sizes are publicly linkable to your wallet.
+- **W2:** + "Your stored memory is encrypted on your device before it ever
+  leaves; storage nodes and the chain see only ciphertext; your wallet — not
+  ours — is the on-chain owner of every upload." Disclosed: the gateway remains
+  in the plaintext path for the inference/transcription call, **and the prompt
+  it sees carries up to ten of your previously-stored entries**, because that is
+  how the companion remembers; save timing and bucketed sizes are publicly
+  linkable to your wallet.
 - **W3 (now):** + "Every live reflection is cryptographically verified in your
   browser — for every user, wallet or not. You own the companion on-chain, and
   every memory root you anchored is a public, timestamped commitment from your

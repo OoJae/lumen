@@ -87,8 +87,10 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
     if (turns.length > 0) preloadEmbedder();
   }, [turns.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleSubmit(entry: string) {
-    if (submitting || streaming) return;
+  /** Returns true only when the entry is safely in memory, so the composer
+   *  knows whether it may clear the box. */
+  async function handleSubmit(entry: string): Promise<boolean> {
+    if (submitting || streaming) return false;
     setSubmitting(true);
     setActiveEntry(entry);
     try {
@@ -106,12 +108,17 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
           createdAt: new Date().toISOString(),
         };
         memory.addTurn(turn);
-      if (turnRecall.length > 0) {
-        setRecalledBy((prev) => ({ ...prev, [turn.id]: turnRecall }));
-      }
+        if (turnRecall.length > 0) {
+          setRecalledBy((prev) => ({ ...prev, [turn.id]: turnRecall }));
+        }
         setActiveEntry(null);
         reset();
+        return true;
       }
+      // No reflection: the entry is nowhere yet. Say so by returning false,
+      // which leaves the words in the composer instead of discarding them.
+      setActiveEntry(null);
+      return false;
     } finally {
       setSubmitting(false);
     }

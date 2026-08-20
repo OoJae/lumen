@@ -2,11 +2,18 @@
 
 A private, user-owned AI journaling companion built on **0G**. You write; Lumen
 reflects and remembers. The difference from every other AI journal: every
-reflection runs inside **0G Compute's TEE "Sealed Inference,"** so the model
-provider — and Lumen itself — *cannot read your words*, and you can inspect the
-proof. Your memory lives **encrypted on 0G Storage** — encrypted on your device,
-uploaded and owned by *your* wallet (Wave 2, live) — and your companion becomes
-an **ERC-7857 INFT you own** (Wave 3).
+reflection goes through **0G Compute's TEE "Sealed Inference,"** and your browser
+verifies the enclave's signature over the exact bytes it received — so the proof
+is something you check rather than something we assert. Your memory lives
+**encrypted on 0G Storage** — encrypted on your device, uploaded and owned by
+*your* wallet (Wave 2, live) — and your companion becomes an **ERC-7857 INFT you
+own** (Wave 3).
+
+Precisely, because it matters: our live provider runs the model at an upstream
+host and the enclave is a *sealed proxy* that attests the request, the response
+and its TLS session to that host. The app says exactly this in the attestation
+viewer, per provider, read from the on-chain registry — see
+[docs/privacy-model.md](docs/privacy-model.md).
 
 > One line: *the only AI you can trust with your inner life, because the trust is
 > enforced in hardware and on-chain — not promised in a privacy policy.*
@@ -49,8 +56,8 @@ Not in Wave 1 (by design): Storage persistence, INFT minting, payments — those
 
 - ✅ **Sign-to-unlock key ceremony**: one free signature derives a non-extractable AES-GCM key (WebCrypto only). Memory-only; refresh relocks. A key-check value catches non-deterministic wallet signatures with a clear error instead of garbage.
 - ✅ **Envelope v2 encryption**: every turn, vector, and snapshot is AAD-bound (type + key version + wallet + slot) — blobs can't be replayed across wallets, slots, or snapshots. Plaintext padded to power-of-two buckets so public sizes leak only coarse magnitude.
-- ✅ **Ciphertext-only local store** (IndexedDB): entries survive refresh; DevTools shows only base64 ciphertext — "no plaintext at rest," checkable in 10 seconds.
-- ✅ **Save to 0G — user-signed**: your wallet (not Lumen) submits and pays the storage tx on the 0G Log layer. Lumen is not in the storage path at all. Receipt shows the memory root + tx, with **"Verify on 0G"** and **"Prove I own it"** (fresh download + local decrypt) affordances.
+- ✅ **Ciphertext-only local store** (IndexedDB): entry and reflection text is always ciphertext at rest — DevTools shows base64 and nothing readable. The plaintext metadata alongside it is enumerated exhaustively in [docs/privacy-model.md](docs/privacy-model.md): turn ids, turn timestamps, the storage pointer (already public on-chain), and a deletion marker per deleted entry.
+- ✅ **Save to 0G — user-signed**: your wallet (not Lumen) submits and pays the storage tx on the 0G Log layer, and Lumen holds no storage key. One honest caveat, the same one [docs/privacy-model.md](docs/privacy-model.md) records: 0G's storage nodes are HTTP-only and an HTTPS page cannot reach them, so Lumen relays the already-encrypted bytes on the browser's behalf. It cannot read them and the transaction is still yours — but "not in the storage path at all" would be false. Receipt shows the memory root + tx, with **"Verify on 0G"** and **"Prove I own it"** (fresh download + local decrypt) affordances.
 - ✅ **Restore-by-root**: paste a root hash on any device, sign with the same wallet, your journal comes back — snapshots also chain (`prevRootHash`) for tamper-evidence.
 - ✅ **Recovery key** export (32-byte key material, loud warnings) + recovery-key unlock.
 - ✅ **On-device recall**: MiniLM embeddings in a lazy Web Worker (0G has no embeddings model yet — disclosed); relevant older entries quietly inform new reflections. Text never leaves the device for embedding; vectors are encrypted at rest.
@@ -74,7 +81,8 @@ you sign.**
   Galileo (16602) at the same address, with **six real mainnet transactions**
   from two independent wallets — mints and compare-and-swap anchors, not just a deploy.
 - ✅ **ERC-7857 to the Final ERC**, plus the 0G reference aliases. Transfers
-  `revert` rather than pretending: a real ERC-7857 transfer must re-encrypt the
+  `revert` rather than pretending — **transfers are not available and no
+  document here should be read as promising them**: a real ERC-7857 transfer must re-encrypt the
   memory to the new owner through a TEE oracle, and none is live. Soulbound and
   honest about why.
 - ✅ **Anchor = compare-and-swap.** `anchorMemoryRoot(tokenId, newRoot, expectedPrevRoot)`
@@ -125,10 +133,15 @@ signer address matching the provider's on-chain address. Verification runs in
 *your* browser — nothing about it is a server-side claim.
 
 **4. Nothing is stored in plaintext.** DevTools → Application → IndexedDB. Every
-record is base64 ciphertext. Ten seconds to check.
+record's payload is base64 ciphertext — no entry or reflection text is readable.
+You will also see plaintext keys and timestamps beside it; those are enumerated
+exhaustively in [docs/privacy-model.md](docs/privacy-model.md), and seeing them
+is the point of checking rather than a contradiction of it.
 
-**5. The tests pass and the CI is intact.** `pnpm test` (141 tests, `apps/web`) and
-`pnpm --filter @lumen/contracts test` (20 tests).
+**5. The tests pass.** `pnpm test` (457 tests, `apps/web`) and
+`pnpm --filter @lumen/contracts test` (20 tests). There is no CI workflow in this
+repo — the suite is run locally before every commit, and saying so is cheaper
+than implying a pipeline that does not exist.
 
 ## Architecture (summary)
 

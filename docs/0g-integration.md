@@ -10,7 +10,7 @@ docs/repos (mid-2026) before wiring. Everything network-specific is centralized 
 |---|---|---|---|
 | **0G Compute — TEE Sealed Inference** | Every reflection is generated inside a hardware enclave via the OpenAI-compatible Router in **private trust mode**; the user inspects the attestation. *This is the product.* | Load-bearing | **W1** (Router) → W3 (Direct SDK / wallet-signed) |
 | **0G Storage — Log + KV** | Encrypted journal history on the Log layer; live memory index + embeddings on KV. Client-encrypted first. | Load-bearing | W2 |
-| **0G Chain + ERC-7857 (Agentic ID)** | Companion minted as an INFT the user owns; registry anchors the encrypted memory root; transfers re-encrypt via the TEE oracle. | Load-bearing | W3 (mainnet, verified) |
+| **0G Chain + ERC-7857 (Agentic ID)** | Companion minted as an INFT the user owns; the token anchors the encrypted memory root. Transfers **revert** — ERC-7857 transfer needs a TEE re-encryption oracle and none is live, so the contract refuses rather than moving a token whose memory the new owner could not read. | Load-bearing | W3 (mainnet, verified) |
 | **0G Pay / x402** | Pay-per-use premium tier. | Supporting | W4 |
 
 ## Wave 1 — Compute (what is wired now)
@@ -67,7 +67,9 @@ which is actually a *stronger* privacy story:
 - **Gateway env:** `ZG_COMPUTE_API_KEY` (the `app-sk-` token), `ZG_PROVIDER_URL`,
   `ZG_COMPUTE_MODEL=glm-5.1`. If `ZG_PROVIDER_URL` is unset, the same code path
   targets the hosted Router instead (drop-in `sk-` support). If a live call
-  times out, the gateway streams a clearly-labeled demo so the UI never hangs.
+  fails, the gateway returns an honest 502 — it does **not** fall back to a demo
+  reflection. It used to, and that was wrong: a journaling app must not invent a
+  reflection and let someone believe a machine read them.
 - **Caveat:** the `app-sk-` token is cryptographically **locked to one provider**
   (no failover) and that provider can be unreachable from some networks. A hosted
   Router `sk-` key (auto-failover across providers) remains the more robust option

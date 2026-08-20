@@ -352,15 +352,34 @@ export default async function CompanionProofPage({
 
           <Heading>What this proves — and what it doesn&apos;t</Heading>
           <div className="rounded-2xl border border-border bg-surface px-5 py-4 text-sm leading-relaxed text-muted">
-            <p className="mb-2 font-medium text-ink">Proven</p>
+            {/* Each bullet reflects what THIS page actually found. It used to be a
+                static list, so a page showing "Chain broken at anchor #3" would
+                assert an unbroken chain four inches lower. */}
+            <p className="mb-2 font-medium text-ink">Proven, for this companion, right now</p>
             <ul className="mb-4 list-disc space-y-1 pl-5">
               <li>This wallet owns companion #{proof.tokenId} on {proof.networkLabel}.</li>
               <li>
                 It committed to each memory root at a specific block time — timestamps that cannot
                 be back-dated.
               </li>
-              <li>The pointer history is an unbroken, compare-and-swap chain.</li>
-              <li>The snapshot the pointer names is real data on 0G Storage.</li>
+              {proof.chain.intact && proof.logAgrees ? (
+                <li>The pointer history is an unbroken, compare-and-swap chain.</li>
+              ) : (
+                <li className="text-caution">
+                  {proof.chain.intact
+                    ? 'NOT this: the log we could fetch does not end where the contract says, so the history is incomplete.'
+                    : `NOT this: the pointer history breaks at anchor #${proof.chain.brokenAtSeq}.`}
+                </li>
+              )}
+              {proof.storage.status === 'available' ? (
+                <li>The snapshot the pointer names is real data on 0G Storage.</li>
+              ) : (
+                <li className="text-caution">
+                  {proof.storage.status === 'missing'
+                    ? 'NOT this: no 0G Storage node is currently serving that root.'
+                    : 'NOT this: the 0G Storage indexer could not be reached, so retrievability is unverified.'}
+                </li>
+              )}
             </ul>
             <p className="mb-2 font-medium text-ink">Not proven</p>
             <ul className="list-disc space-y-1 pl-5">

@@ -30,6 +30,7 @@ import {
   reflectRawResponse,
 } from '@/lib/0g/compute';
 import { isComputeLive } from '@/lib/0g/env';
+import { clientKey, createRateLimiter } from '@/lib/0g/rateLimit';
 import { LUMEN_SYSTEM_PROMPT } from '@/lib/prompts';
 import { foldSystemMessages } from '@/lib/memory/systemMerge';
 import { CHAT_PROVIDER_ADDRESS, PROOF_HEADER } from '@lumen/shared';
@@ -40,6 +41,21 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const encoder = new TextEncoder();
+
+/**
+ * This route spends the 0G Compute credential on every call and is reachable by
+ * anyone, with no account and no auth. Without a limit one script drains it,
+ * and the first person to find out is whoever opens the demo next.
+ *
+ * ~20 reflections in a burst, one per 6s sustained — far above a human writing
+ * a journal, far below a useful drain rate.
+ */
+const limiter = createRateLimiter({ burst: 20, refillPerSecond: 1 / 6 });
+
+/** A journal entry is prose, not a payload. These caps are generous for a
+ *  person and hostile to anyone using the route as free inference. */
+const MAX_MESSAGES = 40;
+const MAX_TOTAL_CHARS = 60_000;
 
 /** Tells the client which wire format to expect (and therefore which parser and
  *  which trust story applies). */
@@ -84,6 +100,14 @@ function demoStream(messages: ChatMessage[]): Response {
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  const limit = limiter(clientKey(req.headers));
+  if (!limit.allowed) {
+    return new Response(
+      'Too many reflections from this address in a short time. Wait a moment and try again.',
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } },
+    );
+  }
+
   let messages: ChatMessage[] = [];
   try {
     const body = (await req.json()) as { messages?: ChatMessage[] };
@@ -93,6 +117,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   if (messages.length === 0) {
     return new Response('`messages` is required', { status: 400 });
+  }
+  if (messages.length > MAX_MESSAGES) {
+    return new Response(`At most ${MAX_MESSAGES} messages per reflection`, { status: 413 });
+  }
+  const totalChars = messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0);
+  if (totalChars > MAX_TOTAL_CHARS) {
+    return new Response('That reflection is too long to send', { status: 413 });
   }
 
   if (!isComputeLive()) return demoStream(messages);
@@ -107,7 +138,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     // the enclave is unreachable is lying to someone who just wrote something
     // true. Fail visibly instead; the entry is already safe on the client.
     return new Response(
-      'The 0G Compute provider could not be reached, so there is no verified reflection to show. Your entry is saved locally — try again in a moment.',
+      'The 0G Compute provider could not be reached, so there is no verified reflection to show. Your entry is still in the box — try again in a moment.',
       { status: 502, headers: { 'Cache-Control': 'no-store' } },
     );
   }
