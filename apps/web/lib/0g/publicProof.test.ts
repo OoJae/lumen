@@ -54,7 +54,7 @@ describe('cache TTL and page copy stay in step', () => {
   // — which is the one thing this page cannot afford to do.
   it('the page revalidate literal equals PROOF_TTL_SECONDS', () => {
     const source = readFileSync(
-      join(__dirname, '..', '..', 'app', 'companion', '[address]', 'page.tsx'),
+      join(__dirname, '..', '..', 'app', '(marketing)', 'companion', '[address]', 'page.tsx'),
       'utf8',
     );
     const match = source.match(/export const revalidate = (\d+);/);
@@ -70,7 +70,7 @@ describe('cache TTL and page copy stay in step', () => {
     // hour-old proof under a sentence promising thirty seconds. A rendered
     // timestamp cannot be made false by a cache: it travels with the data.
     const source = readFileSync(
-      join(__dirname, '..', '..', 'app', 'companion', '[address]', 'page.tsx'),
+      join(__dirname, '..', '..', 'app', '(marketing)', 'companion', '[address]', 'page.tsx'),
       'utf8',
     );
     expect(source).not.toContain('no more than');
@@ -89,7 +89,7 @@ describe('cache TTL and page copy stay in step', () => {
 
 describe('a failed read never renders as a fact', () => {
   const page = readFileSync(
-    join(__dirname, '..', '..', 'app', 'companion', '[address]', 'page.tsx'),
+    join(__dirname, '..', '..', 'app', '(marketing)', 'companion', '[address]', 'page.tsx'),
     'utf8',
   );
   const src = readFileSync(join(__dirname, 'publicProof.ts'), 'utf8');

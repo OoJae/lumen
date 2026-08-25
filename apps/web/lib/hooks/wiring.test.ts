@@ -37,8 +37,13 @@ describe('a ref that decides something must be written by something', () => {
       if (!isRead) return false;
       // Assigned directly?
       if (new RegExp(`\\b${name}\\.current\\s*=[^=]`).test(src)) return false;
-      // Handed to React or to a caller, which may write it for us.
-      if (new RegExp(`ref=\\{${name}\\}|return\\s+${name}\\b|[(,]\\s*${name}\\s*[),]`).test(src)) {
+      // Handed to React or to a caller, which may write it for us. A hook that
+      // returns its ref inside an object literal — `return { ref, progress }` —
+      // counts: the consumer attaches it, and React does the writing.
+      if (
+        new RegExp(`ref=\\{${name}\\}|return\\s+${name}\\b|[(,]\\s*${name}\\s*[),]`).test(src) ||
+        new RegExp(`return \\{[^}]*\\b${name}\\b[^}]*\\}`, 's').test(src)
+      ) {
         return false;
       }
       return true;

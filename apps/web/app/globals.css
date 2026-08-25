@@ -47,6 +47,20 @@
 
   --font-serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Book Antiqua",
     Georgia, "Times New Roman", serif;
+
+  /* Evidence. `font-mono` had no token at all and fell through to Tailwind's
+     default at 25 sites rendering hashes, addresses and root hashes — the one
+     place in this product where the typeface carries a factual claim. Named
+     here so it is a decision rather than a fallback; deliberately still a
+     SYSTEM stack, because the app ships zero webfonts and a hash does not read
+     better in a downloaded one. The marketing group overrides both of these
+     within its own subtree, where there is a font budget and a reason. */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Display. Falls back to the app's own serif so nothing breaks outside the
+     marketing group, which is the only place a display face is loaded. */
+  --font-display: var(--font-instrument, var(--font-serif));
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
 }
@@ -106,7 +120,31 @@ body {
   animation: lumen-blink 1s step-end infinite;
 }
 
+/* The marketing surfaces are always night.
+   Not a preference override for its own sake: the whole landing is a lamp in a
+   dark room, and a lamp on cream paper is just a stain. The journal itself
+   still follows the reader's theme — this is the one place the art direction
+   outranks the toggle, and it only applies where .lumen-night is rendered. */
+html:has(.lumen-night) {
+  background: #100f0c;
+  color-scheme: dark;
+}
+
+/* Headline lines lift into a mask. Reveals by LINE, not by letter — a
+   three-line headline animated per character is the animation equivalent of
+   shouting, and this page has already chosen where it is loud. */
+@keyframes lumen-line {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.lumen-line {
+  animation: lumen-line 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-rise { animation: none; }
+  /* `both` above holds the from-state, so simply cancelling would leave the
+     headline pushed 100% down and invisible. Land it where it belongs. */
+  .lumen-line { animation: none; transform: none; }
   .caret::after { animation: none; }
 }

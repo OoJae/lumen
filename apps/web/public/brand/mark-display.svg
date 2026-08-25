@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Lumen">
+  <!-- Lumen mark. Two optical cuts: mark.svg (icon) below ~48px, mark-display.svg above. Never scale one into the other's range. -->
+  <title>Lumen</title>
+  <path d="M50 10c1.6 25.6 8.8 37.2 40 40-25.6 1.6-37.2 8.8-40 40-1.6-25.6-8.8-37.2-40-40 25.6-1.6 37.2-8.8 40-40Z" fill="currentColor"/>
+</svg>

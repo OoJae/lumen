@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
-import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: 'Lumen — Own your mind. Prove your privacy.',
@@ -29,6 +28,21 @@ export const viewport: Viewport = {
   ],
 };
 
+/**
+ * The root layout deliberately holds NO providers.
+ *
+ * `<Providers>` is wagmi + RainbowKit + TanStack + the memory-key context. Having
+ * it here meant every route paid for the wallet stack: the public companion proof
+ * page — whose own doc comment promises "no wallet, no extension, no account,
+ * nothing to install" — was downloading 366 KB of wallet code to render a
+ * read-only page. (Next's build output reports that route at 108 KB, which is
+ * misleading: it does not attribute root-layout client chunks to the route. The
+ * live page tells the truth.)
+ *
+ * Providers now live in app/(app)/layout.tsx, so only routes that can actually
+ * connect a wallet load one.
+ */
+
 // Set the theme class before paint to avoid a flash of the wrong theme.
 const themeInit = `(function(){try{var t=localStorage.getItem('lumen-theme');var dark=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(dark)document.documentElement.classList.add('dark');}catch(e){}})();`;
 
@@ -38,9 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
-      <body>
-        <Providers>{children}</Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

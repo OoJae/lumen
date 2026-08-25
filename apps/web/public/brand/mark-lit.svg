@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Lumen">
+  <title>Lumen</title>
+  <defs>
+    <radialGradient id="lumen-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.5"/>
+      <stop offset="45%" stop-color="#f59e0b" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#b45309" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lumen-core" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="55%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="50" fill="url(#lumen-halo)"/>
+  <path d="M50 10c1.6 25.6 8.8 37.2 40 40-25.6 1.6-37.2 8.8-40 40-1.6-25.6-8.8-37.2-40-40 25.6-1.6 37.2-8.8 40-40Z" transform="translate(50 50) scale(0.8) translate(-50 -50)" fill="url(#lumen-core)"/>
+</svg>
