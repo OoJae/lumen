@@ -36,15 +36,30 @@ export type StorageProbe =
   | { status: 'missing' }
   | { status: 'unchecked'; reason: string };
 
+/**
+ * Whether the replayed log matches the contract's own storage slot.
+ *
+ * `'unread'` is the state a boolean could not express: the `latestMemoryRoot`
+ * call was rejected, so there is nothing to compare against and the page must
+ * not blame the log — which it did, with "Incomplete log", for a failure that
+ * belonged entirely to the contract read.
+ */
+export type ContractAgreement = 'agrees' | 'disagrees' | 'unread';
+
 export interface CompanionProof {
   address: Address;
   tokenId: string | null;
   owner: Address | null;
   latestRoot: string | null;
-  anchorCount: number;
+  /** null when the read failed — never 0, which reads as a fact. */
+  anchorCount: number | null;
   chain: AnchorChain;
-  /** The replayed log agrees with the contract's own storage slot. */
-  logAgrees: boolean;
+  logAgrees: ContractAgreement;
+  /** Anchors whose block time exceeded the lookup budget, so they carry no
+   *  date and cannot appear on the practice calendar. Reported, not dropped. */
+  undatedAnchors: number;
+  /** ISO-8601. When the RPC reads happened, stamped inside the cached read. */
+  readAt: string;
   storage: StorageProbe;
   contractAddress: Address;
   explorerUrl: string;
@@ -113,8 +128,8 @@ export async function probeStorage(rootHash: string | null): Promise<StorageProb
  * Next 15 does not cache `fetch` by default, and viem's transport is fetch, so
  * the route would re-read the chain on every single hit — about four seconds
  * each time, for a page whose whole job is to be clicked by strangers. Caching
- * the reduced result keeps the shared-link case instant while the page's own
- * copy stays true ("no more than 30 seconds ago").
+ * the reduced result keeps the shared-link case instant. The page states the
+ * READ TIME rather than a maximum age, because neither cache bounds staleness.
  */
 export const loadCompanionProof = (address: Address): Promise<CompanionProof> =>
   unstable_cache(
@@ -123,17 +138,53 @@ export const loadCompanionProof = (address: Address): Promise<CompanionProof> =>
     { revalidate: PROOF_TTL_SECONDS },
   )();
 
+// Literal member expressions — Next only inlines NEXT_PUBLIC_* it can see
+// statically. Mirrors useCompanion.ts, which is the point: the app honoured the
+// override and this page did not, so a custom deployment's owner saw their
+// companion in-app and "No companion here" on their own shareable proof page.
+const ADDRESS_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_ADDRESS;
+const DEPLOY_BLOCK_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_DEPLOY_BLOCK;
+
+/**
+ * Where to start scanning for this deployment's events.
+ *
+ * The built-in table is keyed by NETWORK, not by address, so an overridden
+ * contract would be scanned from the canonical deployment's block — almost
+ * certainly past its own mint, yielding an empty chain and then the
+ * "Incomplete log" verdict, for a companion that is perfectly fine.
+ */
+function deployBlock(networkKey: keyof typeof LUMEN_COMPANION_DEPLOY_BLOCK): bigint {
+  if (ADDRESS_OVERRIDE && DEPLOY_BLOCK_OVERRIDE) {
+    try {
+      return BigInt(DEPLOY_BLOCK_OVERRIDE);
+    } catch {
+      // Unparseable — fall through to the built-in rather than throw on a page
+      // whose job is to render for strangers.
+    }
+  }
+  return LUMEN_COMPANION_DEPLOY_BLOCK[networkKey];
+}
+
 async function readCompanionProof(address: Address): Promise<CompanionProof> {
   const net = activeNetwork();
-  const contractAddress = resolveCompanionAddress(net.key);
+  const contractAddress = resolveCompanionAddress(net.key, ADDRESS_OVERRIDE);
   const base = {
     address,
     tokenId: null,
     owner: null,
     latestRoot: null,
-    anchorCount: 0,
+    // null, not 0. A rejected read is not "re-anchored zero times" — the page
+    // printed that as a fact for a call that never completed, while the two
+    // reads beside it already used null as their honest sentinel.
+    anchorCount: null as number | null,
     chain: buildAnchorChain(null, []),
-    logAgrees: true,
+    logAgrees: 'agrees' as ContractAgreement,
+    /** Undated anchors — see readAnchorLogs' timestamp-lookup budget. */
+    undatedAnchors: 0,
+    /** When the RPC reads actually happened. Stamped INSIDE the cached
+     *  function, so it travels with the data instead of being asserted about
+     *  it. See PROOF_TTL_SECONDS. */
+    readAt: new Date().toISOString(),
     storage: { status: 'unchecked', reason: 'Not checked.' } as StorageProbe,
     contractAddress: (contractAddress ?? '0x') as Address,
     explorerUrl: net.explorerUrl,
@@ -173,7 +224,7 @@ async function readCompanionProof(address: Address): Promise<CompanionProof> {
   const latestRoot =
     rootResult.status === 'fulfilled' ? (rootResult.value as string) : null;
   const anchorCount =
-    countResult.status === 'fulfilled' ? Number(countResult.value as bigint) : 0;
+    countResult.status === 'fulfilled' ? Number(countResult.value as bigint) : null;
   const owner = ownerResult.status === 'fulfilled' ? (ownerResult.value as Address) : null;
 
   // Scan from the deploy block, never genesis — see LUMEN_COMPANION_DEPLOY_BLOCK.
@@ -182,7 +233,7 @@ async function readCompanionProof(address: Address): Promise<CompanionProof> {
     publicClient,
     contractAddress,
     tokenId,
-    LUMEN_COMPANION_DEPLOY_BLOCK[net.key],
+    deployBlock(net.key),
   );
 
   const chain = buildAnchorChain(mint, anchors);
@@ -195,11 +246,22 @@ async function readCompanionProof(address: Address): Promise<CompanionProof> {
     latestRoot,
     anchorCount,
     chain,
-    // agreesWithContract, not an inline compare: when the latestMemoryRoot read
-    // FAILS, latestRoot is null and the inline version returned `true`
-    // unconditionally — printing an "unbroken chain" verdict the page had not
-    // earned. The tested helper requires the chain to be empty in that case.
-    logAgrees: agreesWithContract(chain, latestRoot),
+    /**
+     * Three states, not two.
+     *
+     * `agreesWithContract` returns false when `latestOnChain` is null — and a
+     * REJECTED latestMemoryRoot read produces exactly that. So a companion
+     * whose event log was fetched perfectly got told "Incomplete log ... the
+     * events we could fetch end on a different root than the contract reports",
+     * blaming the one read that succeeded for the failure of the one that
+     * didn't. A boolean cannot express "we never got the contract's answer".
+     */
+    logAgrees: (rootResult.status === 'rejected'
+      ? 'unread'
+      : agreesWithContract(chain, latestRoot)
+        ? 'agrees'
+        : 'disagrees') as ContractAgreement,
+    undatedAnchors: anchors.filter((a) => a.timestamp <= 0).length,
     storage,
   };
 }

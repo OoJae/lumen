@@ -61,11 +61,83 @@ describe('cache TTL and page copy stay in step', () => {
     expect(Number(match![1])).toBe(PROOF_TTL_SECONDS);
   });
 
-  it('the page renders its freshness claim from the constant, not a literal', () => {
+  it('the page states a READ TIME, never a maximum age', () => {
+    // "no more than N seconds ago" was an upper bound nothing enforced. Both
+    // caches in front of this read — the route cache from `revalidate` and the
+    // unstable_cache wrapper — are stale-while-revalidate with no hard age
+    // bound, and they compound, so the first visitor after an idle hour got an
+    // hour-old proof under a sentence promising thirty seconds. A rendered
+    // timestamp cannot be made false by a cache: it travels with the data.
     const source = readFileSync(
       join(__dirname, '..', '..', 'app', 'companion', '[address]', 'page.tsx'),
       'utf8',
     );
-    expect(source).toContain('no more than {PROOF_TTL_SECONDS} seconds ago');
+    expect(source).not.toContain('no more than');
+    expect(source).toContain('proof.readAt');
+    expect(source).toContain('refreshes at least every {PROOF_TTL_SECONDS} seconds');
+  });
+
+  it('readAt is stamped inside the cached read, not at render', () => {
+    // Stamping it at render would print "now" over data an hour old — exactly
+    // the lie the sentence above was making.
+    const source = readFileSync(join(__dirname, 'publicProof.ts'), 'utf8');
+    const readFn = source.slice(source.indexOf('async function readCompanionProof'));
+    expect(readFn).toContain('readAt: new Date().toISOString()');
+  });
+});
+
+describe('a failed read never renders as a fact', () => {
+  const page = readFileSync(
+    join(__dirname, '..', '..', 'app', 'companion', '[address]', 'page.tsx'),
+    'utf8',
+  );
+  const src = readFileSync(join(__dirname, 'publicProof.ts'), 'utf8');
+
+  it('anchorCount is null on a rejected read, not 0', () => {
+    // Three reads share one Promise.allSettled; latestRoot and owner already
+    // used null as their sentinel. anchorCount collapsed to 0, so a call that
+    // never completed printed "Times re-anchored: 0" as though it had.
+    expect(src).toContain("countResult.status === 'fulfilled' ? Number(countResult.value as bigint) : null");
+    expect(page).toContain("proof.anchorCount ??");
+  });
+
+  it('logAgrees carries the third state, so the log is not blamed for a contract failure', () => {
+    // agreesWithContract returns false when latestOnChain is null — which is
+    // exactly what a REJECTED latestMemoryRoot read produces. A boolean could
+    // not distinguish that from a genuine disagreement, so a perfectly fetched
+    // log was accused of being incomplete.
+    expect(src).toContain("'unread'");
+    expect(src).toContain("rootResult.status === 'rejected'");
+    expect(page).toContain("proof.logAgrees === 'unread'");
+    // And no truthiness checks may remain: a non-empty string is always truthy,
+    // so `proof.logAgrees ?` would silently pass for every state.
+    expect(page).not.toMatch(/proof\.logAgrees\s*\?/);
+    expect(page).not.toMatch(/&&\s*proof\.logAgrees\s*$/m);
+  });
+
+  it('undated anchors are reported rather than silently dropped', () => {
+    expect(src).toContain('undatedAnchors');
+    expect(page).toContain('proof.undatedAnchors > 0');
+  });
+});
+
+describe('a custom deployment reads its own contract', () => {
+  const src = readFileSync(join(__dirname, 'publicProof.ts'), 'utf8');
+
+  it('honours NEXT_PUBLIC_LUMEN_INFT_ADDRESS like the app does', () => {
+    // useCompanion honoured it and this page did not, so a custom deployment's
+    // owner saw their companion in-app and "No companion here" on the very page
+    // they would share to prove it.
+    expect(src).toContain('resolveCompanionAddress(net.key, ADDRESS_OVERRIDE)');
+  });
+
+  it('reads the start block as a literal member expression, so Next inlines it', () => {
+    expect(src).toContain('process.env.NEXT_PUBLIC_LUMEN_INFT_DEPLOY_BLOCK');
+  });
+
+  it('falls back to the built-in block when only the address is overridden', () => {
+    // Guessing a start block would be worse than the canonical one: the page
+    // would scan from nowhere useful and report an empty chain.
+    expect(src).toContain('ADDRESS_OVERRIDE && DEPLOY_BLOCK_OVERRIDE');
   });
 });

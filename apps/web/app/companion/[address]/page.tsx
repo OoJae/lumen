@@ -239,9 +239,21 @@ export default async function CompanionProofPage({
           {hasCompanion ? `Companion #${proof.tokenId}` : 'No companion here'}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          Everything below was read straight from {proof.networkLabel} (chain {proof.chainId}),
-          no more than {PROOF_TTL_SECONDS} seconds ago. You need no wallet, no account and no trust in Lumen to
-          check it — and it reveals nothing about what the owner wrote.
+          {/*
+            This used to promise an upper bound on the data's age. It could not keep
+            that promise: BOTH caches in front of this read — the route cache
+            from `revalidate` and the unstable_cache wrapper — are
+            stale-while-revalidate with no hard age bound, and they compound, so
+            the first visitor after an idle hour gets an hour-old proof. A
+            rendered timestamp cannot be made false by a cache, because the cache
+            carries it along with the data it stamped.
+          */}
+          Everything below was read straight from {proof.networkLabel} (chain {proof.chainId}) at{' '}
+          <time dateTime={proof.readAt} className="font-mono text-xs">
+            {proof.readAt.replace('T', ' ').slice(0, 19)} UTC
+          </time>
+          , and refreshes at least every {PROOF_TTL_SECONDS} seconds. You need no wallet, no account
+          and no trust in Lumen to check it — and it reveals nothing about what the owner wrote.
         </p>
       </header>
 
@@ -288,7 +300,10 @@ export default async function CompanionProofPage({
             <Row label="Memory root">
               <span className="font-mono text-xs break-all">{proof.latestRoot ?? '—'}</span>
             </Row>
-            <Row label="Times re-anchored">{proof.anchorCount}</Row>
+            <Row label="Times re-anchored">
+              {/* null, not 0 — a rejected contract read is not "zero times". */}
+              {proof.anchorCount ?? <span className="text-muted">couldn&apos;t read</span>}
+            </Row>
           </Card>
 
           <Heading
@@ -301,12 +316,12 @@ export default async function CompanionProofPage({
           </Card>
           <p
             className={`mt-3 rounded-xl border px-4 py-3 text-sm leading-relaxed ${
-              proof.chain.intact && proof.logAgrees
+              proof.chain.intact && proof.logAgrees === 'agrees'
                 ? 'border-accent/40 bg-accent-soft text-ink'
                 : 'border-caution/40 bg-caution/10 text-caution'
             }`}
           >
-            {proof.chain.intact && proof.logAgrees ? (
+            {proof.chain.intact && proof.logAgrees === 'agrees' ? (
               <>
                 <b>Chain intact.</b> Every anchor continues the previous one, and the root the log
                 ends on matches what the contract itself reports. Nothing has been rewritten.
@@ -315,6 +330,15 @@ export default async function CompanionProofPage({
               <>
                 <b>Chain broken at anchor #{proof.chain.brokenAtSeq}.</b> That anchor does not
                 continue the previous root.
+              </>
+            ) : proof.logAgrees === 'unread' ? (
+              <>
+                {/* The state a boolean could not hold. Blaming the log here —
+                    which is what this page did — accuses the one read that
+                    succeeded of the failure of the one that didn&apos;t. */}
+                <b>Couldn&apos;t read the contract&apos;s own root.</b> The event log came back
+                intact, but the call asking the contract what it currently points at was rejected,
+                so this page cannot confirm the two match. Reload to try again.
               </>
             ) : (
               <>
@@ -331,6 +355,21 @@ export default async function CompanionProofPage({
           <div className="rounded-2xl border border-border bg-surface px-5 py-5 shadow-sm">
             <PracticeGrid calendar={calendar} />
           </div>
+          {proof.undatedAnchors > 0 && (
+            <p className="mt-2 text-xs leading-relaxed text-caution">
+              {/* These anchors exist and are listed above; only their block
+                  TIME went unread, because dating them all would cost one RPC
+                  round trip per block. Dropping them silently made the calendar
+                  under-report a record whose entire claim is completeness. */}
+              {proof.undatedAnchors === 1
+                ? '1 older anchor could not be dated'
+                : `${proof.undatedAnchors} older anchors could not be dated`}{' '}
+              within this page&apos;s block-lookup budget, so {proof.undatedAnchors === 1 ? 'its' : 'their'}{' '}
+              {proof.undatedAnchors === 1 ? 'day is' : 'days are'} missing from the grid above. They
+              are still listed in the pointer history — this record under-reports itself rather than
+              inventing a date.
+            </p>
+          )}
           {calendar.sealedDays > 0 && (
             <Card>
               <Row label="Days sealed">{calendar.sealedDays}</Row>
@@ -364,15 +403,17 @@ export default async function CompanionProofPage({
                 It committed to each memory root at a specific block time — timestamps that cannot
                 be back-dated.
               </li>
-              {proof.chain.intact && proof.logAgrees ? (
+              {proof.chain.intact && proof.logAgrees === 'agrees' ? (
                 <li>
                   The pointer history is an unbroken chain, and only the owner can extend it.
                 </li>
               ) : (
                 <li className="text-caution">
-                  {proof.chain.intact
-                    ? 'NOT this: the log we could fetch does not end where the contract says, so the history is incomplete.'
-                    : `NOT this: the pointer history breaks at anchor #${proof.chain.brokenAtSeq}.`}
+                  {!proof.chain.intact
+                    ? `NOT this: the pointer history breaks at anchor #${proof.chain.brokenAtSeq}.`
+                    : proof.logAgrees === 'unread'
+                      ? 'NOT this: the contract read failed, so this page could not compare the log against it.'
+                      : 'NOT this: the log we could fetch does not end where the contract says, so the history is incomplete.'}
                 </li>
               )}
               {proof.storage.status === 'available' ? (
