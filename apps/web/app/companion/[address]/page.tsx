@@ -168,8 +168,10 @@ function StorageView({ proof }: { proof: CompanionProof }) {
         </Row>
         <Row label="Readable by them">
           <span className="text-ink">
-            No. Those nodes hold AES-GCM ciphertext whose key is derived from the owner&apos;s
-            wallet signature and never leaves their device.
+            Not by design — Lumen encrypts on the owner&apos;s device before upload, with a key
+            derived from their wallet signature that never leaves it. Note this page did not check
+            that: it asked the nodes whether the root is retrievable, not what the bytes contain.
+            Nobody but the owner can check it, which is the point.
           </span>
         </Row>
       </>

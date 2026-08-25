@@ -9,7 +9,7 @@ docs/repos (mid-2026) before wiring. Everything network-specific is centralized 
 | 0G module | How Lumen uses it | Depth | Wave |
 |---|---|---|---|
 | **0G Compute — TEE Sealed Inference** | Every reflection is generated inside a hardware enclave via the OpenAI-compatible Router in **private trust mode**; the user inspects the attestation. *This is the product.* | Load-bearing | **W1** (Router) → W3 (Direct SDK / wallet-signed) |
-| **0G Storage — Log + KV** | Encrypted journal history on the Log layer; live memory index + embeddings on KV. Client-encrypted first. | Load-bearing | W2 |
+| **0G Storage — Log layer** | Encrypted journal history, client-encrypted before upload, uploaded and paid for by the user's own wallet. The memory index and embeddings live in the encrypted snapshot itself, NOT on KV: KV has no hosted endpoint (see §5 below), so it was never shipped — this row used to claim it was. | Load-bearing | W2 |
 | **0G Chain + ERC-7857 (Agentic ID)** | Companion minted as an INFT the user owns; the token anchors the encrypted memory root. Transfers **revert** — ERC-7857 transfer needs a TEE re-encryption oracle and none is live, so the contract refuses rather than moving a token whose memory the new owner could not read. | Load-bearing | W3 (mainnet, verified) |
 | **0G Pay / x402** | Pay-per-use premium tier. | Supporting | W4 |
 
