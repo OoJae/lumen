@@ -228,3 +228,97 @@ describe('contextNotice', () => {
     expect(n).not.toContain('stay on this device');
   });
 });
+
+describe('scripts that do not use Latin sentence enders', () => {
+  // The whole suite contained no non-Latin punctuation, so it passed green while
+  // every recalled entry in these languages was forwarded WHOLE — the exact
+  // behaviour this module exists to stop, silently skipped for a large fraction
+  // of the world. Latin enders require trailing whitespace (so "3.14" and "e.g."
+  // survive); CJK/Indic/Arabic enders must not, because those scripts commonly
+  // write no space after the stop.
+  const CASES: Array<[string, string, string]> = [
+    [
+      'Chinese',
+      '今天早上我很早就起床了。我和我妈妈谈过了。她看起来不太好。我很担心。也许我应该回家看看她。',
+      '妈妈 担心',
+    ],
+    [
+      'Japanese',
+      '今朝は早く起きた。母と話した。元気がなさそうだった。とても心配だ。家に帰るべきかもしれない。',
+      '母 心配',
+    ],
+    [
+      'Hindi',
+      'आज सुबह मैं जल्दी उठा। मैंने अपनी माँ से बात की। वह ठीक नहीं लग रही थीं। मुझे चिंता हो रही है। शायद मुझे घर जाना चाहिए।',
+      'माँ चिंता',
+    ],
+    [
+      'Urdu',
+      'آج صبح میں جلدی اٹھا۔ میں نے اپنی ماں سے بات کی۔ وہ ٹھیک نہیں لگ رہی تھیں۔ مجھے فکر ہو رہی ہے۔',
+      'ماں فکر',
+    ],
+  ];
+
+  it.each(CASES)('%s: splits into sentences rather than one blob', (_name, entry) => {
+    expect(splitSentences(entry).length).toBeGreaterThan(1);
+  });
+
+  it.each(CASES)('%s: the entry is NOT forwarded whole', (_name, entry, query) => {
+    const e = excerptEntry(entry, query, { maxSentences: 2 });
+    expect(e.total).toBeGreaterThan(1);
+    expect(e.text).not.toBe(entry);
+    expect(e.reduced).toBe(true);
+    expect(e.charsWithheld).toBeGreaterThan(0);
+  });
+
+  it('does not split a decimal — the reason Latin enders keep their whitespace rule', () => {
+    expect(splitSentences('It cost 3.14 dollars.')).toHaveLength(1);
+  });
+
+  it('DOES split after an abbreviation, and that is acceptable', () => {
+    // A known limitation, documented rather than pretended away: "e.g." ends in
+    // a period followed by a space, so it splits. The consequence is only that
+    // the entry has two smaller sentences instead of one — which if anything
+    // sends LESS. It would matter for display; it does not matter for minimising.
+    expect(splitSentences('Bring milk, e.g. oat milk.')).toHaveLength(2);
+  });
+});
+
+describe('every gap is marked, including a hard cut', () => {
+  it('marks a first sentence that had to be truncated', () => {
+    // The system prompt tells the model "… marks where text was deliberately
+    // withheld". A silent mid-word cut made that untrue for exactly the entries
+    // that lost the most text.
+    const e = excerptEntry('x'.repeat(2_000), 'x', { maxChars: 100 });
+    expect(e.text.endsWith(ELISION)).toBe(true);
+    expect(e.charsWithheld).toBeGreaterThan(1_800);
+  });
+
+  it('counts a sentence that IS the elision character', () => {
+    // Recovering `kept` by filtering pieces for the marker undercounted here and
+    // appended a trailing marker describing nothing. The query matches nothing,
+    // so the fallback keeps the first N sentences IN ORDER — which is the only
+    // way the marker-sentence gets chosen at all.
+    const e = excerptEntry(`${ELISION} Second line. Third line.`, 'zzzz', { maxSentences: 3 });
+    expect(e.total).toBe(3);
+    expect(e.kept).toBe(3);
+    expect(e.reduced).toBe(false);
+  });
+});
+
+describe('contextNotice never prints a zero', () => {
+  it('says it plainly rather than "About 0 characters"', () => {
+    // Rounding to the nearest 100 printed "About 0 characters … stay on this
+    // device" for every reduction under 50 — a sentence that reads as a bug and
+    // undersells a real one.
+    const n = contextNotice({ sessionTurns: 2, recalledEntries: 1, charsWithheld: 30 });
+    expect(n).not.toContain('About 0');
+    expect(n).toContain('stays on this device');
+  });
+
+  it('still quotes a real number when there is one', () => {
+    expect(contextNotice({ sessionTurns: 2, recalledEntries: 1, charsWithheld: 640 })).toContain(
+      'About 600 characters',
+    );
+  });
+});

@@ -71,6 +71,19 @@ export type KeyEvidence =
   | 'bootstrap-kcv'
   /** This device holds ciphertext and none of it decrypts. */
   | 'refuted-data'
+  /**
+   * None of it decrypts, AND this device's KCV says the key that wrote it was
+   * never proven against the real journal.
+   *
+   * This is the fresh-device trap. An `asserted` signature unlock writes a
+   * bootstrap KCV, nothing stops the user writing an entry under that unproven
+   * key, and from that moment `probeArtifacts` refutes every candidate — so the
+   * CORRECT recovery key, on the one device it exists for, was refused with
+   * "check for typos" and the wallet's whole anchored journal became unreachable
+   * in that browser profile. The bootstrap comment promised a recovery key could
+   * "still overrule it"; that promise expired the moment one entry was written.
+   */
+  | 'refuted-data-unproven'
   /** The KCV disagrees, and no data corroborates it either way. */
   | 'refuted-kcv'
   /** Nothing on this device to check against. */
@@ -167,7 +180,13 @@ export function readKcvPlaintext(text: string): Extract<KcvStatus, 'ok-proven' |
 
 export function evidenceFrom(data: DataVerdict, kcv: KcvStatus): KeyEvidence {
   if (data === 'proven') return 'proven-data';
-  if (data === 'refuted') return 'refuted-data';
+  if (data === 'refuted') {
+    // Only an explicit bootstrap marker downgrades a refutation. 'none' does
+    // not: a missing KCV is unknown provenance (the write is best-effort), and
+    // guessing "unproven" there would admit a mistyped recovery key onto a
+    // device holding real, correctly-encrypted entries.
+    return kcv === 'ok-bootstrap' ? 'refuted-data-unproven' : 'refuted-data';
+  }
   if (kcv === 'ok-proven') return 'proven-kcv';
   if (kcv === 'ok-bootstrap') return 'bootstrap-kcv';
   if (kcv === 'bad') return 'refuted-kcv';
@@ -208,6 +227,17 @@ export function decideUnlock(source: UnlockSource, evidence: KeyEvidence): Unloc
         : // Not a wallet-determinism problem — do not trap the UI in `mismatch`,
           // which hides "Sign to unlock".
           { admit: false, refusal: 'recovery-mismatch-data', nextState: 'locked' };
+    case 'refuted-data-unproven':
+      // A signature that disagrees is still the determinism problem, and the
+      // recovery key is the documented way out — so that half is unchanged.
+      // But the recovery key must now be ABLE to get in: everything this device
+      // holds was written by a key that was never proven, so refusing on its
+      // authority is refusing on the authority of a guess. Admitted as
+      // `asserted`; the entries written under the other key stay on disk and are
+      // surfaced by `undecryptableCount` rather than silently discarded.
+      return source === 'signature'
+        ? { admit: false, refusal: 'signature-mismatch-data', nextState: 'mismatch' }
+        : { admit: true, trust: 'asserted', writeKcv: null };
     case 'refuted-kcv':
       return source === 'signature'
         ? { admit: false, refusal: 'signature-mismatch-kcv', nextState: 'mismatch' }
@@ -233,7 +263,13 @@ export type ExportVerdict = { allow: true; trust: KeyTrust } | { allow: false };
  * that is refused.
  */
 export function decideExport(evidence: KeyEvidence): ExportVerdict {
-  if (evidence === 'refuted-data' || evidence === 'refuted-kcv') return { allow: false };
+  if (
+    evidence === 'refuted-data' ||
+    evidence === 'refuted-data-unproven' ||
+    evidence === 'refuted-kcv'
+  ) {
+    return { allow: false };
+  }
   const unchecked = evidence === 'no-evidence' || evidence === 'bootstrap-kcv';
   return { allow: true, trust: unchecked ? 'asserted' : 'proven' };
 }

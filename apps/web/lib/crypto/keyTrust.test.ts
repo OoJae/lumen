@@ -39,6 +39,7 @@ const ALL_EVIDENCE: KeyEvidence[] = [
   'proven-kcv',
   'bootstrap-kcv',
   'refuted-data',
+  'refuted-data-unproven',
   'refuted-kcv',
   'no-evidence',
 ];
@@ -49,7 +50,50 @@ describe('evidenceFrom — ciphertext outranks the KCV', () => {
   it('lets real data decide, whatever the KCV says', () => {
     for (const kcv of ALL_KCV) {
       expect(evidenceFrom('proven', kcv), kcv).toBe('proven-data');
-      expect(evidenceFrom('refuted', kcv), kcv).toBe('refuted-data');
+      // Refuted stays refuted for every KCV state — the marker only changes
+      // WHICH refutation, never turns one into an admission on its own.
+      expect(evidenceFrom('refuted', kcv), kcv).toMatch(/^refuted-data/);
+    }
+  });
+
+  it('distinguishes a refutation by a never-proven key from a real one', () => {
+    // The trap: an asserted signature unlock writes a bootstrap KCV, the user
+    // writes one entry under that unproven key, and from then on every candidate
+    // is refuted — including the CORRECT recovery key, on the one device it
+    // exists for.
+    expect(evidenceFrom('refuted', 'ok-bootstrap')).toBe('refuted-data-unproven');
+    // A proven KCV, or none at all, keeps the strict refusal. 'none' is unknown
+    // provenance, and guessing would admit a typo onto a device holding a real
+    // journal.
+    expect(evidenceFrom('refuted', 'ok-proven')).toBe('refuted-data');
+    expect(evidenceFrom('refuted', 'none')).toBe('refuted-data');
+    expect(evidenceFrom('refuted', 'bad')).toBe('refuted-data');
+  });
+
+  it('THE LOCKOUT FIX: the correct recovery key gets in, the wrong signature does not', () => {
+    const rec = decideUnlock('recovery', 'refuted-data-unproven');
+    expect(rec.admit).toBe(true);
+    if (rec.admit) {
+      expect(rec.trust).toBe('asserted');
+      // Must not stamp: the key has still proven nothing.
+      expect(rec.writeKcv).toBeNull();
+    }
+    // A fresh signature that disagrees is the determinism problem, unchanged.
+    const sig = decideUnlock('signature', 'refuted-data-unproven');
+    expect(sig.admit).toBe(false);
+    if (!sig.admit) expect(sig.nextState).toBe('mismatch');
+  });
+
+  it('still refuses a recovery key when the device holds a PROVEN journal', () => {
+    // The counterpart the fix must not break: on a device whose key was proven,
+    // a recovery key that decrypts nothing is a typo and must be rejected.
+    const d = decideUnlock('recovery', 'refuted-data');
+    expect(d.admit).toBe(false);
+  });
+
+  it('never exports a key any refutation disproves', () => {
+    for (const e of ['refuted-data', 'refuted-data-unproven', 'refuted-kcv'] as const) {
+      expect(decideExport(e).allow, e).toBe(false);
     }
   });
 
@@ -76,17 +120,19 @@ describe('decideUnlock — the full table', () => {
     ['signature', 'proven-kcv', 'admit proven'],
     ['signature', 'bootstrap-kcv', 'admit asserted'],
     ['signature', 'refuted-data', 'refuse signature-mismatch-data mismatch'],
+    ['signature', 'refuted-data-unproven', 'refuse signature-mismatch-data mismatch'],
     ['signature', 'refuted-kcv', 'refuse signature-mismatch-kcv mismatch'],
     ['signature', 'no-evidence', 'admit asserted writeKcv:bootstrap'],
     ['recovery', 'proven-data', 'admit proven writeKcv:proven'],
     ['recovery', 'proven-kcv', 'admit proven'],
     ['recovery', 'bootstrap-kcv', 'admit asserted'],
     ['recovery', 'refuted-data', 'refuse recovery-mismatch-data locked'],
+    ['recovery', 'refuted-data-unproven', 'admit asserted'],
     ['recovery', 'refuted-kcv', 'admit asserted'],
     ['recovery', 'no-evidence', 'admit asserted'],
   ];
 
-  it('matches the design table in all twelve cells', () => {
+  it('matches the design table in every cell', () => {
     for (const [source, evidence, expected] of table) {
       const d = decideUnlock(source, evidence);
       const actual = d.admit

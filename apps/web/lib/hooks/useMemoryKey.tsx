@@ -190,8 +190,13 @@ async function createKcv(
 /** Everything this device can prove about a candidate, in one place. */
 async function gatherEvidence(wallet: string, candidate: CryptoKey): Promise<KeyEvidence> {
   const data = await probeArtifacts(candidate, iterateCiphertext(wallet), CURRENT_KEY_VERSION);
-  // Only consult the KCV when the ciphertext had nothing to say.
-  const kcv = data === 'no-data' ? await verifyKcv(wallet, candidate) : 'none';
+  // The KCV is consulted ALWAYS, not only when the ciphertext is silent. It is
+  // still not the authority — `evidenceFrom` lets data decide — but when data
+  // refutes, the KCV's provenance marker is what distinguishes "this device
+  // holds a real journal you cannot open" from "this device holds entries a
+  // never-proven key wrote". Refusing a correct recovery key on the strength of
+  // the second was a permanent lockout.
+  const kcv = await verifyKcv(wallet, candidate);
   return evidenceFrom(data, kcv);
 }
 
@@ -261,7 +266,24 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
    *  that differs, and it lives in keyTrust.ts. */
   const admit = useCallback(
     async (forWallet: string, candidate: CryptoKey, source: UnlockSource) => {
+      /**
+       * The wallet can change WHILE this runs, and the window is not small: the
+       * signature prompt is open for as long as the user takes, and account
+       * switching is one click away in every wallet UI.
+       *
+       * Without this check the sequence was silent, permanent data loss.
+       * `unlock()` captured wallet A, awaited the prompt, the user switched to B
+       * (the effect above nulls the key and re-locks), and then this function
+       * finished and installed A's KEY under B's session. Every entry written
+       * afterwards was encrypted with A's key but AAD-bound to
+       * `lumen:v2:<v>:turn:<B>:<id>` — so B could never decrypt it, and neither
+       * could A, because the AAD names B. Nothing surfaced; the journal just
+       * quietly became unreadable.
+       */
+      const stillCurrent = () => walletRef.current === forWallet;
+
       const evidence = await gatherEvidence(forWallet, candidate);
+      if (!stillCurrent()) throw new Error('Wallet changed during unlock — nothing was unlocked.');
       const decision = decideUnlock(source, evidence);
 
       if (!decision.admit) {
@@ -273,12 +295,15 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
         throw new Error(refusalMessage(decision.refusal));
       }
 
+
       if (decision.writeKcv) {
         await createKcv(forWallet, candidate, decision.writeKcv).catch(() => {
           // A KCV is an optimisation. Failing to cache it must never cost the
           // user an unlock they have already earned.
         });
       }
+      // Re-checked after the write too: createKcv is another await.
+      if (!stillCurrent()) throw new Error('Wallet changed during unlock — nothing was unlocked.');
       keyRef.current = candidate;
       setTrust(decision.trust);
       setSource(source);

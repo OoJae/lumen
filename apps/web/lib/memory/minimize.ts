@@ -76,8 +76,15 @@ export interface Excerpt {
  * nothing can be trimmed from it.
  */
 export function splitSentences(entry: string): string[] {
+  // Latin enders need trailing whitespace to avoid splitting "3.14" and "e.g.".
+  // CJK, Devanagari and Arabic enders do NOT — those scripts frequently write no
+  // space after the stop, and requiring one meant an entire Chinese, Japanese,
+  // Hindi or Urdu entry counted as ONE sentence. Nothing could then be trimmed
+  // from it, so every recalled entry in those languages was forwarded WHOLE —
+  // exactly the behaviour this module exists to stop, silently skipped for a
+  // large fraction of the world.
   const parts = entry
-    .split(/(?<=[.!?])\s+|\n+/g)
+    .split(/(?<=[.!?])\s+|(?<=[\u3002\uFF01\uFF1F\u0964\u0965\u06D4\u061F\u2026])\s*|\n+/g)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   return parts.length > 0 ? parts : [];
@@ -148,19 +155,33 @@ export function excerptEntry(entry: string, query: string, opts: MinimizeOptions
   chosen.sort((a, b) => a.index - b.index);
 
   const pieces: string[] = [];
+  // Tracked explicitly rather than recovered by filtering `pieces` for the
+  // elision marker: an entry can legitimately contain a sentence that IS just
+  // "…", and filtering by content silently undercounted it and appended a
+  // trailing marker that described nothing.
+  const kept: Array<{ index: number }> = [];
+  /** Only the sentence text actually sent — never the markers we insert. */
+  const sentPieces: string[] = [];
   let used = 0;
   let lastIndex = -1;
   for (const s of chosen) {
     if (used > 0 && used + s.text.length > maxChars) break;
     if (lastIndex >= 0 && s.index !== lastIndex + 1) pieces.push(ELISION);
     // The first sentence is admitted even if it alone exceeds maxChars, then
-    // hard-cut — returning nothing would silently drop a relevant memory.
-    pieces.push(used === 0 ? s.text.slice(0, maxChars) : s.text);
+    // hard-cut — returning nothing would silently drop a relevant memory. The
+    // cut carries its own marker: the prompt tells the model that every gap is
+    // marked, and a silent mid-word truncation made that untrue for exactly the
+    // entries that lost the most text.
+    const first = used === 0 && s.text.length > maxChars;
+    const body = first ? s.text.slice(0, maxChars).trimEnd() : s.text;
+    pieces.push(first ? `${body}${ELISION}` : body);
+    sentPieces.push(body);
+    kept.push({ index: s.index });
     used += s.text.length;
     lastIndex = s.index;
   }
 
-  const keptIndices = chosen.slice(0, pieces.filter((p) => p !== ELISION).length);
+  const keptIndices = kept;
   const leading = keptIndices.length > 0 && keptIndices[0]!.index > 0;
   const trailing = keptIndices.length > 0 && keptIndices[keptIndices.length - 1]!.index < total - 1;
   const text = [leading ? ELISION : '', pieces.join(' '), trailing ? ELISION : '']
@@ -168,14 +189,23 @@ export function excerptEntry(entry: string, query: string, opts: MinimizeOptions
     .join(' ')
     .trim();
 
-  const kept = keptIndices.length;
-  // Compare against the entry's own length, not the sum of its sentences —
-  // splitting discards the whitespace between them, and counting that as
-  // "withheld" would overstate the saving.
-  const sentText = text.replace(new RegExp(ELISION, 'g'), '').replace(/\s+/g, ' ').trim();
+  const keptCount = keptIndices.length;
+  // Measured from the sentences actually SENT, not by stripping markers out of
+  // the rendered text. Stripping treated an elision the writer had typed
+  // themselves as one of ours, so an entry containing '…' reported characters
+  // withheld that were never withheld. Compare against the entry's own length
+  // rather than the sum of its sentences: splitting discards the whitespace
+  // between them, and counting that as withheld would overstate the saving.
+  const sentText = sentPieces.join(' ').replace(/\s+/g, ' ').trim();
   const charsWithheld = Math.max(0, entry.replace(/\s+/g, ' ').trim().length - sentText.length);
 
-  return { text, kept, total, reduced: kept < total || charsWithheld > 0, charsWithheld };
+  return {
+    text,
+    kept: keptCount,
+    total,
+    reduced: keptCount < total || charsWithheld > 0,
+    charsWithheld,
+  };
 }
 
 export interface MinimizedRecall<T> {
@@ -232,9 +262,15 @@ export function contextNotice(input: {
   }
   if (bits.length === 0) return 'This reflection sends only what you just wrote.';
 
+  // Rounding to the nearest 100 printed "About 0 characters ... stay on this
+  // device" for every reduction under 50 — a sentence that reads as a bug and
+  // undersells a real one. Below the rounding floor, say it without a number.
+  const rounded = Math.round(charsWithheld / 100) * 100;
   const withheld =
-    charsWithheld > 0
-      ? ` About ${Math.round(charsWithheld / 100) * 100} characters of those earlier entries stay on this device.`
-      : '';
+    charsWithheld <= 0
+      ? ''
+      : rounded === 0
+        ? ' A little of those earlier entries stays on this device.'
+        : ` About ${rounded} characters of those earlier entries stay on this device.`;
   return `This reflection sends what you just wrote, plus ${bits.join(' and ')}.${withheld}`;
 }

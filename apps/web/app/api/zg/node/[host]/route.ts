@@ -40,6 +40,13 @@ export async function POST(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(45_000),
+      // `redirect: 'error'` rather than the default 'follow'. Every private-range
+      // and allowlist check runs against the FIRST hop only, so a permitted host
+      // answering 302 to http://169.254.169.254/ — or to any RFC1918 address —
+      // would have been followed and its body returned to the caller, defeating
+      // the SSRF guard entirely. JSON-RPC has no legitimate reason to redirect,
+      // so treating one as a failure costs nothing and closes the hole.
+      redirect: 'error',
     });
     const json = await upstream.json();
     return Response.json(rewriteNodeUrls(json, req.nextUrl.origin), { status: upstream.status });

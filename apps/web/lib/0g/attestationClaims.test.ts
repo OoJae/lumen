@@ -127,22 +127,24 @@ describe('the unverified path must never present itself as verified', () => {
     expect(live.note).toContain('NOT cryptographically verified');
   });
 
-  it('GUARDS THE GUARD: if the header is ever sent again, revisit this claim', () => {
-    // The whole justification for dropping "private trust mode" is that nothing
-    // sends the header. If that changes, these assertions need rethinking
-    // rather than silently continuing to pass.
-    const sources = ['lib/0g/compute.ts', 'app/api/reflect/route.ts'].map((rel) => {
-      try {
-        return readFileSync(join(process.cwd(), rel), 'utf8');
-      } catch {
-        return '';
-      }
-    });
-
-    // If both reads failed the assertions below would pass vacuously.
-    expect(sources.filter((s) => s.length > 0)).toHaveLength(2);
-    for (const src of sources) {
-      expect(src).not.toContain('X-0G-Provider-Trust-Mode');
-    }
+  it('the private-mode header IS sent — the copy must not rest on it being absent', () => {
+    // This test previously asserted the OPPOSITE, by grepping compute.ts for the
+    // literal 'X-0G-Provider-Trust-Mode'. It passed vacuously: the header name is
+    // the constant PRIVATE_MODE_HEADER, imported from @lumen/shared, so the
+    // literal never appears in that file while the header goes out on every
+    // request. A guard that cannot fire is worse than no guard, because it gets
+    // cited as evidence — as it was, in a commit message.
+    //
+    // The invariant that actually matters: Lumen REQUESTS private trust mode and
+    // nothing verifies the provider honoured it, so no user-facing string may
+    // present it as something attested.
+    const compute = readFileSync(join(process.cwd(), 'lib/0g/compute.ts'), 'utf8');
+    const models = readFileSync(
+      join(process.cwd(), '..', '..', 'packages', 'shared', 'src', 'models.ts'),
+      'utf8',
+    );
+    expect(compute.length, 'compute.ts unreadable — this check would be vacuous').toBeGreaterThan(0);
+    expect(models).toContain('X-0G-Provider-Trust-Mode');
+    expect(compute).toContain('PRIVATE_MODE_HEADER');
   });
 });

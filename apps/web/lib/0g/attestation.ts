@@ -55,15 +55,25 @@ export const ATTESTATION_NOTE_DEMO =
  * Pre-verification, or verification unavailable.
  *
  * This used to open "Processed through the provider's secure enclave in private
- * trust mode." The last four words were unearned: `X-0G-Provider-Trust-Mode`
- * appears nowhere in this codebase, the 0G SDK never sends it either, and the
- * provider's own credential path carries only `Authorization`. So the app was
- * naming a request mode it does not request.
+ * trust mode."
  *
- * What IS true, and is what this now says: the provider is registered on-chain
- * as running the model inside a TEE, and that registration — not a header — is
- * where the enclave property comes from. The rest is the honest caveat that
- * THIS response was not checked.
+ * CORRECTION, and the reason this comment is long. A previous pass removed that
+ * phrase on the grounds that `X-0G-Provider-Trust-Mode` "appears nowhere in this
+ * codebase". That was WRONG, and wrong in an avoidable way: the grep looked for
+ * the literal string under apps/web, while the header name is the exported
+ * constant PRIVATE_MODE_HEADER in packages/shared/src/models.ts, sent by
+ * lib/0g/compute.ts on every live chat and transcription call.
+ *
+ * The phrase still should not be here, but for the real reason: sending a header
+ * is a REQUEST, not a proof. Nothing in the response tells us the provider
+ * honoured it, and the 0G SDK's own credential path does not send it at all —
+ * so a provider that ignored it would look identical. Presenting a request we
+ * made as an attestation we received is the overclaim.
+ *
+ * What IS checkable, and is what this now says: the provider is registered
+ * on-chain as running the model inside a TEE, with an acknowledged signer. That
+ * registration stands on its own. The rest is the honest caveat that THIS
+ * response was not verified.
  */
 export function buildTrustModeNote(disclosure?: ProviderDisclosure, reason?: string): string {
   const tail = reason
