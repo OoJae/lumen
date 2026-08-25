@@ -159,6 +159,25 @@ export function MemoryStrip({
         >
           <span className="block font-medium text-ink">{memory.keyNotice.title}</span>
           {memory.keyNotice.body}
+          {/* The notice computes the one thing that turns an unproven key into a
+              proven one, and this used to drop it on the floor — the same defect
+              as the flag that chooses the notice. Both actions already have
+              buttons elsewhere in the strip; this puts the right one where the
+              sentence that asks for it is. */}
+          {/* No inline button for 'restore': CompanionBlock already renders a
+              dedicated restore panel — with its own progress and error surface —
+              a few rows below, and a second entry point would fork that state.
+              'export-key' has no such neighbour; its button is at the bottom of
+              the strip, far from the sentence asking for it. */}
+          {memory.keyNotice.action === 'export-key' && (
+            <button
+              type="button"
+              onClick={() => setOpen('recovery')}
+              className="mt-2 block rounded-full border border-border px-3 py-1 text-xs font-medium text-ink hover:border-accent/40"
+            >
+              Export your recovery key
+            </button>
+          )}
         </div>
       )}
       {undecryptable && (

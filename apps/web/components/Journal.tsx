@@ -48,6 +48,18 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   // user twice.
   const seal = useSeal(memory, companion);
   const net = activeNetwork();
+
+  // The on-chain half of "this wallet has a journal somewhere else". It is the
+  // half that matters most: an anchored root can exist with NO local pointer —
+  // a new device, a new browser profile, cleared site data — which is exactly
+  // when an unproven key must be told to restore before writing, not to start
+  // a new journal. The contract read resolves after the unlock, which is why
+  // the notice is derived rather than captured. `useJournalMemory` reports the
+  // local half; this only ever adds to it.
+  const { reportSnapshot } = memory;
+  useEffect(() => {
+    if (companion.onChainRoot) reportSnapshot(true);
+  }, [companion.onChainRoot, reportSnapshot]);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [activeEntry, setActiveEntry] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

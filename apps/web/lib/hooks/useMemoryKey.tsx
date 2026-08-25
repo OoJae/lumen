@@ -82,8 +82,27 @@ export interface MemoryKeyContextValue {
   /** How well this device could check the live key. Null unless unlocked. */
   trust: KeyTrust | null;
   /** What to tell the user about an unproven key. Null when there is nothing
-   *  worth saying. */
+   *  worth saying. DERIVED, not snapshotted — see `reportSnapshot`. */
   notice: UnlockNotice | null;
+  /**
+   * Tell the provider whether this wallet has a journal somewhere other than
+   * this device — a local pointer, or a root anchored on-chain.
+   *
+   * This exists because the answer usually arrives AFTER the unlock: the
+   * companion's `latestMemoryRoot` is an async contract read, and the user can
+   * unlock before it lands. So the notice is derived from this value rather
+   * than captured when `admit()` runs, and it corrects itself the moment the
+   * read resolves.
+   *
+   * The bug this replaces: a `hasSnapshotRef` that was read to choose the
+   * notice, documented as "called by useJournalMemory", and written by nothing.
+   * It was permanently false, so a user with an anchored journal opening Lumen
+   * on a new device was told "This is a new journal on this device" and pointed
+   * at the wrong next step — export a key, rather than restore before writing.
+   * The pure `unlockNotice` was tested for both values, so the suite stayed
+   * green; the defect was entirely in the wiring.
+   */
+  reportSnapshot(hasSnapshot: boolean): void;
   /** Explicit user action: sign → derive → check against real data → unlocked. */
   unlock(): Promise<void>;
   lock(): void;
@@ -161,17 +180,31 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
   const keyRef = useRef<CryptoKey | null>(null);
   const [state, setState] = useState<MemoryKeyState>('no-wallet');
   const [trust, setTrust] = useState<KeyTrust | null>(null);
-  const [notice, setNotice] = useState<UnlockNotice | null>(null);
-  /** Whether this wallet has a snapshot pointer anywhere — shapes the copy. */
-  const hasSnapshotRef = useRef(false);
+  /** Which path admitted the live key. Half of what the notice is derived from. */
+  const [source, setSource] = useState<UnlockSource | null>(null);
+  /** Whether this wallet has a journal somewhere else — the other half. */
+  const [hasSnapshot, setHasSnapshot] = useState(false);
 
   // Wallet switch or disconnect → drop the key immediately.
   useEffect(() => {
     keyRef.current = null;
     setTrust(null);
-    setNotice(null);
+    setSource(null);
+    // Per-wallet, like everything else here: the previous wallet's journal says
+    // nothing about this one's.
+    setHasSnapshot(false);
     setState(wallet ? 'locked' : 'no-wallet');
   }, [wallet]);
+
+  /**
+   * The notice is DERIVED. It has to be: `hasSnapshot` usually resolves after
+   * the unlock, and a notice captured at unlock time would keep giving the
+   * wrong advice for the rest of the session.
+   */
+  const notice = useMemo(
+    () => (trust && source ? unlockNotice({ trust, source, hasSnapshot }) : null),
+    [trust, source, hasSnapshot],
+  );
 
   /** The one signing call in the app. No hook, so no mutation, so no cache. */
   const sign = useCallback(async (): Promise<string> => {
@@ -188,7 +221,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       if (!decision.admit) {
         keyRef.current = null;
         setTrust(null);
-        setNotice(null);
+        setSource(null);
         setState(decision.nextState);
         throw new Error(refusalMessage(decision.refusal));
       }
@@ -201,9 +234,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       }
       keyRef.current = candidate;
       setTrust(decision.trust);
-      setNotice(
-        unlockNotice({ trust: decision.trust, source, hasSnapshot: hasSnapshotRef.current }),
-      );
+      setSource(source);
       setState('unlocked');
     },
     [],
@@ -244,15 +275,15 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
   const confirmKeyProven = useCallback(async () => {
     const key = keyRef.current;
     if (!key || !wallet) return;
+    // `unlockNotice` returns null for a proven key, so the notice clears itself.
     setTrust((prev) => (prev === 'proven' ? prev : 'proven'));
-    setNotice(null);
     await createKcv(wallet, key).catch(() => {});
   }, [wallet]);
 
   const lock = useCallback(() => {
     keyRef.current = null;
     setTrust(null);
-    setNotice(null);
+    setSource(null);
     setState(wallet ? 'locked' : 'no-wallet');
   }, [wallet]);
 
@@ -275,7 +306,9 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
 
   const getKey = useCallback(() => keyRef.current, []);
 
-  /** Called by useJournalMemory once it knows whether a pointer exists. */
+  /** Idempotent: React bails out of a state update to the same value. */
+  const reportSnapshot = useCallback((has: boolean) => setHasSnapshot(has), []);
+
   const value = useMemo<MemoryKeyContextValue>(
     () => ({
       state,
@@ -288,6 +321,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       exportRecoveryKey,
       unlockWithRecoveryKey,
       confirmKeyProven,
+      reportSnapshot,
       getKey,
     }),
     [
@@ -300,6 +334,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       exportRecoveryKey,
       unlockWithRecoveryKey,
       confirmKeyProven,
+      reportSnapshot,
       getKey,
     ],
   );

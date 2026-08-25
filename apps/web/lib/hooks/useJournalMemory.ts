@@ -135,6 +135,13 @@ export interface JournalMemory {
   /** Deletions recorded on this device, sorted by id. */
   deletions: DeletedTurnV1[];
   /**
+   * Tell the key provider this wallet has a journal off this device, so an
+   * unproven key is told to restore-and-prove rather than to start writing.
+   * This hook reports local pointers itself; Journal folds in the on-chain
+   * anchored root, which is the case that has no local pointer.
+   */
+  reportSnapshot(hasSnapshot: boolean): void;
+  /**
    * Remove one entry from this device and from every snapshot saved after
    * this. Resolves once the local removal has COMMITTED. Never touches
    * snapshots already on 0G — nothing can.
@@ -724,6 +731,22 @@ export function useJournalMemory(): JournalMemory {
   );
   const dirty = useMemo(() => isDirty(status), [status]);
 
+  /**
+   * The local half of "does this wallet have a journal somewhere else?".
+   *
+   * A pointer on either network means a snapshot exists off this device, which
+   * changes what an unproven key should be told to do: restore and prove the
+   * key, rather than start writing. Journal folds in the on-chain half (an
+   * anchored root can exist with no local pointer at all — that is exactly the
+   * fresh-device case), so this reports a floor, never a veto.
+   */
+  const localSnapshot = Boolean(receipt || foreignReceipt);
+  const { reportSnapshot } = memoryKey;
+  useEffect(() => {
+    if (localSnapshot) reportSnapshot(true);
+  }, [localSnapshot, reportSnapshot]);
+
+
   const save = useMemo(
     () => ({ state: saveState, error: saveError, receipt, foreignReceipt, status, dirty, toZg }),
     [saveState, saveError, receipt, foreignReceipt, status, dirty, toZg],
@@ -744,6 +767,7 @@ export function useJournalMemory(): JournalMemory {
       exportRecoveryKey: memoryKey.exportRecoveryKey,
       trust: memoryKey.trust,
       keyNotice: memoryKey.notice,
+      reportSnapshot,
       undecryptableCount,
       persistFailureCount,
       save,
@@ -765,6 +789,7 @@ export function useJournalMemory(): JournalMemory {
       memoryKey.exportRecoveryKey,
       memoryKey.trust,
       memoryKey.notice,
+      reportSnapshot,
       undecryptableCount,
       persistFailureCount,
       save,
