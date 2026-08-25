@@ -52,6 +52,7 @@ import {
   buildSnapshot,
   decryptSnapshot,
   encryptSnapshot,
+  nextChainLink,
   packVector,
   snapshotBucketBytes,
   unpackVector,
@@ -544,13 +545,55 @@ export function useJournalMemory(): JournalMemory {
     setSaveState('saving');
     setSaveError(null);
     try {
-      // Read tombstones fresh: another tab may have deleted since this one
-      // hydrated, and uploading an entry the user already removed would put it
-      // back on 0G permanently.
-      const freshTombs = await db.getTombstones(forWallet);
+      /**
+       * Read the durable state fresh, because this tab's copy can be stale.
+       *
+       * Tombstones were already read here for exactly that reason. Turns and the
+       * pointer were not, and both mattered more:
+       *
+       *  - `turnsRef.current` and `receiptRef.current` are written only during
+       *    render from state, and state is loaded only by `hydrate()`, which
+       *    runs on unlock and never again. There is no BroadcastChannel, storage
+       *    listener or visibility hook anywhere in the app, so a second tab is
+       *    never refreshed.
+       *  - Two tabs both hydrated at {seq:5, root:R5}. A saves → seq 6, prev R5.
+       *    B then saves → ALSO seq 6, ALSO prev R5: a duplicated sequence
+       *    number, a forked chain, A's paid-for R6 orphaned on 0G permanently,
+       *    every entry A wrote after B hydrated dropped from the backup, and the
+       *    pointer overwritten so the local record of R6 is gone too.
+       */
+      const [freshTombs, storedTurns, freshPointer] = await Promise.all([
+        db.getTombstones(forWallet),
+        db.getTurns(forWallet),
+        db.getPointer(forWallet, networkKey),
+      ]);
       const allDeletions = mergeTombstones(deletionsRef.current, freshTombs);
       const deletedIds = tombstoneIdSet(allDeletions);
-      const current = withoutDeleted(turnsRef.current, deletedIds);
+      const inMemory = withoutDeleted(turnsRef.current, deletedIds);
+
+      // Union in anything another tab wrote that this one has never seen. The
+      // in-memory copy wins on id because it carries its embedding; a
+      // stored-only turn joins without one, which costs recall coverage for
+      // that entry and never costs the entry itself.
+      const known = new Set(inMemory.map((t) => t.id));
+      const adopted: RecallableTurn[] = [];
+      for (const record of storedTurns) {
+        if (deletedIds.has(record.meta.id) || known.has(record.meta.id)) continue;
+        try {
+          const bytes = await decryptBytes(key, record.envelope, {
+            typ: 'turn',
+            keyVersion,
+            aadId: `${forWallet}:${record.meta.id}`,
+          });
+          adopted.push(JSON.parse(decoder.decode(bytes)) as PersistedTurnV1);
+        } catch {
+          // Written under a different key. Not ours to publish.
+        }
+      }
+      const current =
+        adopted.length === 0
+          ? inMemory
+          : [...inMemory, ...adopted].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       // Converge this tab, or turns.length disagrees with the receipt's
       // turnCount forever and the journal reads 'stale' permanently.
       if (current.length !== turnsRef.current.length) setTurns(current);
@@ -562,8 +605,7 @@ export function useJournalMemory(): JournalMemory {
       const snapshot = buildSnapshot({
         wallet: forWallet,
         keyVersion,
-        seq: (receiptRef.current?.seq ?? 0) + 1,
-        prevRootHash: receiptRef.current?.rootHash ?? null,
+        ...nextChainLink(freshPointer ?? null, receiptRef.current),
         createdAt: new Date().toISOString(),
         turns: current.map(toPersisted),
         vectors: current

@@ -9,6 +9,7 @@ import {
   buildSnapshot,
   decryptSnapshot,
   encryptSnapshot,
+  nextChainLink,
   packVector,
   snapshotBucketBytes,
   unpackVector,
@@ -163,5 +164,42 @@ describe('deletions travel with the snapshot', () => {
       deletions: mergeTombstones([markers[1]!], [markers[0]!]),
     });
     expect(canonicalJson(a)).toBe(canonicalJson(b));
+  });
+});
+
+describe('nextChainLink — the two-tab fork', () => {
+  const R5 = { seq: 5, rootHash: '0xR5' };
+  const R6 = { seq: 6, rootHash: '0xR6' };
+
+  it('extends the chain normally when both views agree', () => {
+    expect(nextChainLink(R5, R5)).toEqual({ seq: 6, prevRootHash: '0xR5' });
+  });
+
+  it('THE FORK: a stale tab cannot reissue a sequence number already on 0G', () => {
+    // Tab A and tab B both hydrated at seq 5. A saved → the durable pointer is
+    // now {6, R6}, but B's in-memory receipt still says {5, R5}. Reading the
+    // in-memory value alone produced seq 6 a second time, chained to R5, which
+    // orphaned A's paid-for R6 permanently and dropped every entry A wrote.
+    expect(nextChainLink(R6, R5)).toEqual({ seq: 7, prevRootHash: '0xR6' });
+  });
+
+  it('does not regress when the durable read is BEHIND this tab', () => {
+    // The mirror case: a pointer write that failed locally (pointerLost) leaves
+    // the device behind what it actually published, and chaining to the older
+    // root would fork just as badly in the other direction.
+    expect(nextChainLink(R5, R6)).toEqual({ seq: 7, prevRootHash: '0xR5' });
+  });
+
+  it('starts at 1 with nothing saved anywhere', () => {
+    expect(nextChainLink(null, null)).toEqual({ seq: 1, prevRootHash: null });
+  });
+
+  it('uses whichever side exists when only one does', () => {
+    expect(nextChainLink(R5, null)).toEqual({ seq: 6, prevRootHash: '0xR5' });
+    expect(nextChainLink(null, R5)).toEqual({ seq: 6, prevRootHash: '0xR5' });
+  });
+
+  it('never returns a seq below 1, whatever it is handed', () => {
+    expect(nextChainLink({ seq: 0, rootHash: '0x' }, null).seq).toBe(1);
   });
 });

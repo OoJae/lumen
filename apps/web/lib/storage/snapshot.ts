@@ -169,3 +169,30 @@ function splitLastColon(id: string): [string, string] {
   if (i < 0) throw new Error('Corrupt snapshot AAD id');
   return [id.slice(0, i), id.slice(i + 1)];
 }
+
+/**
+ * Where the next snapshot attaches to the chain.
+ *
+ * Pure so the two-tab case can actually be tested. `toZg` used to read this
+ * straight off the in-memory receipt, and that receipt is written only during
+ * render from state, which is loaded only by `hydrate()` — which runs on unlock
+ * and never again. Nothing refreshes a second tab, so two tabs hydrated at the
+ * same point both computed the same next seq: a duplicated sequence number, a
+ * forked prev-root chain, and the first tab's paid-for upload orphaned on 0G
+ * with no pointer left anywhere that names it.
+ *
+ * `fresh` is the pointer read from IndexedDB moments before upload; `inMemory`
+ * is this tab's own view. Taking the max of the two means neither a stale tab
+ * nor a stale read can reissue a sequence number that is already published.
+ */
+export function nextChainLink(
+  fresh: { seq: number; rootHash: string } | null,
+  inMemory: { seq: number; rootHash: string } | null,
+): { seq: number; prevRootHash: string | null } {
+  return {
+    seq: Math.max(fresh?.seq ?? 0, inMemory?.seq ?? 0) + 1,
+    // Prefer the durable pointer: if it is ahead, its root is the one actually
+    // on 0G, and chaining to this tab's older root is what forks the history.
+    prevRootHash: fresh?.rootHash ?? inMemory?.rootHash ?? null,
+  };
+}
