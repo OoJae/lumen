@@ -211,7 +211,13 @@ export function useJournalMemory(): JournalMemory {
   const walletRef = useRef<string | null>(memoryKey.wallet);
   const prevWalletRef = useRef<string | null>(null);
 
-  const { getKey, keyVersion, wallet, state: keyState } = memoryKey;
+  // `confirmKeyProven` is destructured rather than reached through `memoryKey`
+  // so the dependency arrays below can be TRUE. Reaching through the object left
+  // `memoryKey` missing from two dep arrays; the callbacks then ran the first
+  // render's closure, and the promotion to a proven key silently never happened.
+  // It is stable by construction (useCallback([]) over a ref) — but nobody
+  // should have to re-derive that at each call site, and eslint cannot.
+  const { getKey, keyVersion, wallet, state: keyState, confirmKeyProven } = memoryKey;
 
   /**
    * Embedding backfill runs through a bounded queue so a cold model slows the
@@ -388,7 +394,7 @@ export function useJournalMemory(): JournalMemory {
     setUndecryptableCount(Math.max(0, failedToDecrypt));
     // One authenticated decrypt of real wallet-bound ciphertext PROVES this key.
     // This is what promotes a fresh-device recovery unlock from 'asserted'.
-    if (hydrated.length > 0) void memoryKey.confirmKeyProven();
+    if (hydrated.length > 0) void confirmKeyProven();
 
     // Backfill: session turns written before the wallet existed. The deleted
     // filter is load-bearing — without it a turn removed from the store while
@@ -430,7 +436,7 @@ export function useJournalMemory(): JournalMemory {
     for (const turn of merged) {
       if (!turn.embedding) embedQueue.push(turn.id, turn);
     }
-  }, [getKey, keyVersion, persistTurn, embedQueue, networkKey, otherKey]);
+  }, [getKey, keyVersion, persistTurn, embedQueue, networkKey, otherKey, confirmKeyProven]);
 
   const unlock = useCallback(async () => {
     await memoryKey.unlock();
@@ -612,7 +618,7 @@ export function useJournalMemory(): JournalMemory {
       const snapshot = await decryptSnapshot(key, bytes, { wallet: forWallet, keyVersion });
       // The snapshot decrypted, so this key is provably the journal's key. On a
       // fresh device this is the moment a recovery unlock becomes 'proven'.
-      void memoryKey.confirmKeyProven();
+      void confirmKeyProven();
 
       // Learn deletions the snapshot carries BEFORE merging, and hard-delete
       // anything they cover. This line is what makes cross-device deletion real
@@ -641,11 +647,13 @@ export function useJournalMemory(): JournalMemory {
         ),
       );
 
-      const { merged, added, skippedDeleted } = mergeRestored(
-        turnsRef.current,
-        restorable,
-        deletedIds,
-      );
+      // `skippedDeleted` is deliberately NOT taken from here. mergeRestored
+      // counts incoming turns that are tombstoned, and `restorable` was already
+      // filtered by exactly that set — so it is always 0 at this call site. It
+      // looks like the right number, which makes it a trap: using it would mean
+      // restoreSkippedNotice never fires. The honest count is computed at the
+      // return, against the unfiltered snapshot.
+      const { merged, added } = mergeRestored(turnsRef.current, restorable, deletedIds);
       setTurns(merged);
       setDeletions(union);
       deletedIdsRef.current = deletedIds;
@@ -681,7 +689,7 @@ export function useJournalMemory(): JournalMemory {
       }
       return { restored: added, skippedDeleted: snapshot.turns.length - restorable.length };
     },
-    [getKey, keyVersion, persistTurn, embedQueue, networkKey],
+    [getKey, keyVersion, persistTurn, embedQueue, networkKey, confirmKeyProven],
   );
 
   const nothingSavedHere = useCallback(() => {

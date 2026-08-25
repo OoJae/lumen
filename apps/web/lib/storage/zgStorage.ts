@@ -39,10 +39,6 @@ function indexerRpc(): string {
   return `${window.location.origin}/api/zg/indexer?network=${net.key}`;
 }
 
-function evmRpc(): string {
-  return activeNetwork().rpcUrl;
-}
-
 /** Thrown when the signing wallet can't cover gas + the storage fee. The seam
  *  stays out of the remedy business — which remedy to show (faucet vs "send
  *  0G") is a network question, answered in lib/storage/saveErrorCopy.ts. */

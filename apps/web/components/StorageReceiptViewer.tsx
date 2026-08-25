@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useModalFocus } from '@/lib/hooks/useModalFocus';
 
-import { sameRoot, shortRoot } from '@/lib/0g/companion';
+import { sameRoot } from '@/lib/0g/companion';
 import { activeNetwork } from '@/lib/0g/network';
 import type { Companion } from '@/lib/hooks/useCompanion';
 import type { JournalMemory, ProofResult } from '@/lib/hooks/useJournalMemory';

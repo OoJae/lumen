@@ -18,4 +18,5 @@ allowBuilds:
   protobufjs: false # transformers.js transitive; postinstall not needed
   secp256k1: true # hardhat toolchain native signing addon
   sharp: true
+  unrs-resolver: true # native path resolver for eslint's import rules
   utf-8-validate: false

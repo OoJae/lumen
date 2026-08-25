@@ -35,7 +35,7 @@ import {
   type ChatMessage,
   type AttestationInfo,
 } from '@lumen/shared';
-import { buildLiveAttestation, buildDemoAttestation } from './attestation';
+import { buildDemoAttestation } from './attestation';
 
 /** Abort a live call that produces no response within this window (ms). */
 const LIVE_TIMEOUT_MS = 22_000;
