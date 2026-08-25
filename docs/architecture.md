@@ -117,21 +117,28 @@ gateway from that path is Wave 4 — see [privacy-model.md](privacy-model.md).
 4. **Recall:** top-k cosine over decrypted in-memory vectors beyond the session
    window, prepended as a labeled context block. Any failure → plain session
    context; the loop never blocks on a cold model.
-5. **Delete:** a tombstone, so a delete propagates across devices through the
+5. **Two tabs.** `toZg` re-reads the pointer and the stored turns from IndexedDB
+   immediately before building a snapshot, so a stale tab cannot reissue a
+   published `seq` or fork the chain. A `BroadcastChannel` nudge
+   (`lib/storage/tabSync.ts`) then converges the other tab's *screen* — it
+   carries only which wallet changed and roughly what, never journal content,
+   and the receiving tab re-reads its own IndexedDB. Same-origin is not the
+   same as trusted, so every message is validated before it is acted on.
+6. **Delete:** a tombstone, so a delete propagates across devices through the
    snapshot chain instead of being silently resurrected by the next restore. The
    dialog refuses the words "permanently", "forever" and "erased" — a snapshot
    already on 0G cannot be unpublished by anyone, Lumen included.
-6. **Save to 0G:** turns + vectors + tombstones → canonical JSON → padded to a
+7. **Save to 0G:** turns + vectors + tombstones → canonical JSON → padded to a
    power-of-two bucket → encrypted (AAD `…:snapshot:<wallet>:<seq>`, chained via
    `prevRootHash`) → **the user's wallet signs and pays** `indexer.upload` on the
    Log layer. Receipt = `{seq, rootHash, txHash}`. Lumen is not in this path;
    the `/api/zg/*` routes are a CORS shim with an SSRF-guarded allowlist, not a
    custodian.
-7. **Restore:** locally from IndexedDB on re-unlock, or from any device via
+8. **Restore:** locally from IndexedDB on re-unlock, or from any device via
    `downloadToBlob(rootHash, proof:true)` → decrypt → hydrate. A successful
    decrypt promotes an asserted key to **proven** and rewrites the KCV from
    proven material, which is what makes fresh-device recovery self-healing.
-8. **Voice:** MediaRecorder → re-encoded to 16 kHz mono WAV in-browser
+9. **Voice:** MediaRecorder → re-encoded to 16 kHz mono WAV in-browser
    (`lib/media/wav.ts`, because 0G's Whisper 400s on webm/mp4) → `/api/transcribe`
    → whisper-large-v3 (TeeML) → transcript into the composer for review. No key
    → no mic.
@@ -207,7 +214,8 @@ funded inference wallet per user. That is Wave 4.
 | `apps/web/lib/hooks/{useSeal,useCompanion,useAnchorArchive}.ts` | Seal run, INFT state, anchor archive |
 | `apps/web/lib/hooks/useModalFocus.ts` | Focus move/trap/restore, shared by all nine dialogs |
 | `apps/web/lib/memory/*` | Session context, recall, search, resurfacing, embed queue, tombstones |
-| `apps/web/lib/storage/{db,snapshot,zgStorage}.ts` | Ciphertext-only IndexedDB + tombstones · snapshot codec · user-signed 0G seam |
+| `apps/web/lib/storage/{db,snapshot,zgStorage}.ts` | Ciphertext-only IndexedDB + tombstones · snapshot codec + chain link · user-signed 0G seam |
+| `apps/web/lib/storage/tabSync.ts` | Cross-tab convergence nudges — counts and ids only, never content |
 | `apps/web/lib/export/bundle.ts` | Deterministic JSON/Markdown export, proof included |
 | `contracts/contracts/LumenCompanion.sol` | ERC-7857 INFT, anchor chain, zero admin keys |
 | `packages/shared/src/*` | Verified 0G params, model catalog, shared types |

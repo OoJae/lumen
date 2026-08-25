@@ -57,6 +57,12 @@ import {
   snapshotBucketBytes,
   unpackVector,
 } from '@/lib/storage/snapshot';
+import {
+  openTabSync,
+  shouldApply,
+  strongest,
+  type TabSyncKind,
+} from '@/lib/storage/tabSync';
 import { WrongChainError } from '@/lib/0g/chainGuard';
 import { activeNetwork, otherNetworkKey } from '@/lib/0g/network';
 import { isDirty, syncStatus, type SyncStatus } from '@/lib/storage/saveStatus';
@@ -200,6 +206,17 @@ export function useJournalMemory(): JournalMemory {
   const [persistFailureCount, setPersistFailureCount] = useState(0);
   /** The snapshot reached 0G but this device could not remember where. */
   const [pointerLost, setPointerLost] = useState(false);
+
+  /**
+   * Cross-tab nudges.
+   *
+   * The two-tab DATA problem is fixed in toZg, which re-reads the pointer and
+   * the stored turns before building a snapshot. This fixes the SCREEN: without
+   * it a second tab still shows the old receipt and offers to publish work the
+   * other tab already published, telling the user something untrue until they
+   * reload. Held in a ref because the post sites are callbacks, not renders.
+   */
+  const syncRef = useRef<ReturnType<typeof openTabSync> | null>(null);
 
   const turnsRef = useRef<RecallableTurn[]>(turns);
   turnsRef.current = turns;
@@ -345,6 +362,12 @@ export function useJournalMemory(): JournalMemory {
   // real function instead of the no-op placeholder.
   embedRef.current = embedAndPersist;
 
+  /** Nudge the other tabs. Never throws; a missed nudge costs a stale view. */
+  const notifyTabs = useCallback((kind: TabSyncKind) => {
+    const forWallet = walletRef.current;
+    if (forWallet) syncRef.current?.post(kind, forWallet, networkKey);
+  }, [networkKey]);
+
   const hydrate = useCallback(async () => {
     const key = getKey();
     const forWallet = walletRef.current;
@@ -448,6 +471,59 @@ export function useJournalMemory(): JournalMemory {
     }
   }, [getKey, keyVersion, persistTurn, embedQueue, networkKey, otherKey, confirmKeyProven]);
 
+  /**
+   * Open the channel and absorb what applies to this tab.
+   *
+   * Messages are coalesced: a save posts both kinds in the same tick, and
+   * re-reading turns re-reads the pointer anyway, so `strongest` collapses a
+   * burst into one response instead of one hydrate per message. The delay is a
+   * frame's worth, not a debounce — long enough to merge a burst, short enough
+   * that the other tab converges before the user looks at it.
+   */
+  useEffect(() => {
+    let pending: TabSyncKind[] = [];
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const sync = openTabSync((data) => {
+      if (!shouldApply(data, { wallet: walletRef.current, network: networkKey, now: Date.now() })) {
+        return;
+      }
+      pending.push(data.kind);
+      if (timer) return;
+      timer = setTimeout(() => {
+        const kind = strongest(pending);
+        pending = [];
+        timer = null;
+        if (!kind) return;
+        if (kind === 'turns') {
+          // Decrypts. hydrate() is already idempotent and is what unlock runs.
+          void hydrate();
+          return;
+        }
+        // Pointer only: no decryption, so do the cheap read directly.
+        const forWallet = walletRef.current;
+        if (!forWallet) return;
+        void db
+          .getPointer(forWallet, networkKey)
+          .then((fresh) => {
+            if (fresh && walletRef.current === forWallet) setReceipt(fresh);
+          })
+          .catch(() => {
+            // A failed convergence read leaves this tab stale, which is where
+            // it already was. Never worse.
+          });
+      }, 50);
+    });
+
+    syncRef.current = sync;
+    return () => {
+      if (timer) clearTimeout(timer);
+      syncRef.current = null;
+      sync.close();
+    };
+  }, [hydrate, networkKey]);
+
+
   const unlock = useCallback(async () => {
     await memoryKey.unlock();
     await hydrate();
@@ -469,11 +545,15 @@ export function useJournalMemory(): JournalMemory {
       const key = getKey();
       const forWallet = walletRef.current;
       if (key && forWallet) {
-        void persistTurn(key, forWallet, recallable).catch(() => {
-          // The entry is on screen but not on disk. Surface it — a reload will
-          // lose it, and the chip must stop claiming it is stored.
-          setPersistFailureCount((n) => n + 1);
-        });
+        void persistTurn(key, forWallet, recallable)
+          // Only after it COMMITTED. Nudging on a failed write would tell the
+          // other tab to go and read an entry that is not there.
+          .then(() => notifyTabs('turns'))
+          .catch(() => {
+            // The entry is on screen but not on disk. Surface it — a reload will
+            // lose it, and the chip must stop claiming it is stored.
+            setPersistFailureCount((n) => n + 1);
+          });
       }
 
       // Embed asynchronously — never awaited by the reflect loop.
@@ -481,7 +561,7 @@ export function useJournalMemory(): JournalMemory {
       // now, not behind a backfill of their whole history.
       void embedAndPersist(recallable);
     },
-    [getKey, persistTurn, embedAndPersist],
+    [getKey, persistTurn, embedAndPersist, notifyTabs],
   );
 
   /**
@@ -532,8 +612,12 @@ export function useJournalMemory(): JournalMemory {
       if (walletRef.current === forWallet) {
         setDeletions((prev) => mergeTombstones(prev, [marker]));
       }
+      // After the transaction committed, never before — the rollback above is
+      // the reason. A tab told to re-read a delete that did not happen would
+      // hide an entry that is still on this device.
+      notifyTabs('turns');
     },
-    [getKey],
+    [getKey, notifyTabs],
   );
 
   const toZg = useCallback(async (): Promise<StorageReceipt> => {
@@ -656,6 +740,10 @@ export function useJournalMemory(): JournalMemory {
         pointerPersisted = false;
       }
       setPointerLost(!pointerPersisted);
+      // Both kinds: the pointer moved, and any turns this tab adopted from
+      // another are now the shared view. The receiver collapses the burst.
+      notifyTabs('pointer');
+      notifyTabs('turns');
       return nextReceipt;
     } catch (err) {
       const { InsufficientFundsError } = await zg();
@@ -678,7 +766,7 @@ export function useJournalMemory(): JournalMemory {
       });
       throw err;
     }
-  }, [connector, getKey, keyVersion, networkKey]);
+  }, [connector, getKey, keyVersion, networkKey, notifyTabs]);
 
   const restoreFromRoot = useCallback(
     async (rootHash: string): Promise<RestoreResult> => {

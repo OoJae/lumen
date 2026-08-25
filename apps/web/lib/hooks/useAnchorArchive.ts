@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
-import { LUMEN_COMPANION_DEPLOY_BLOCK, type ZgNetworkKey } from '@lumen/shared';
+import { resolveCompanionDeployBlock, type ZgNetworkKey } from '@lumen/shared';
 
 import { buildAnchorChain, type AnchorChain } from '@/lib/0g/anchorHistory';
 import { readAnchorLogs, type LogReader } from '@/lib/0g/anchorLogs';
@@ -16,6 +16,11 @@ import {
   type PracticeCalendar,
 } from '@/lib/0g/practice';
 import type { Companion } from './useCompanion';
+
+// Literal member expressions — Next only inlines NEXT_PUBLIC_* it can see
+// statically. Mirrors lib/0g/publicProof.ts and lib/hooks/useCompanion.ts.
+const ADDRESS_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_ADDRESS;
+const DEPLOY_BLOCK_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_DEPLOY_BLOCK;
 
 /**
  * A companion's on-chain history, read in the browser.
@@ -74,7 +79,10 @@ export function useAnchorArchive(companion: Companion): AnchorArchive {
         publicClient as unknown as LogReader,
         address as `0x${string}`,
         tokenId as bigint,
-        LUMEN_COMPANION_DEPLOY_BLOCK[net.key],
+        // Same resolver the public proof page uses, so the in-app archive and
+        // the shareable page can never disagree about where history starts —
+        // which they would have, silently, on any overridden deployment.
+        resolveCompanionDeployBlock(net.key, ADDRESS_OVERRIDE, DEPLOY_BLOCK_OVERRIDE),
       );
       return buildAnchorChain(mint, anchors);
     },

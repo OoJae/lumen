@@ -15,7 +15,7 @@ import { unstable_cache } from 'next/cache';
 import { createPublicClient, http, type Address } from 'viem';
 import {
   LUMEN_COMPANION_ABI,
-  LUMEN_COMPANION_DEPLOY_BLOCK,
+  resolveCompanionDeployBlock,
   resolveCompanionAddress,
 } from '@lumen/shared';
 
@@ -145,26 +145,6 @@ export const loadCompanionProof = (address: Address): Promise<CompanionProof> =>
 const ADDRESS_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_ADDRESS;
 const DEPLOY_BLOCK_OVERRIDE = process.env.NEXT_PUBLIC_LUMEN_INFT_DEPLOY_BLOCK;
 
-/**
- * Where to start scanning for this deployment's events.
- *
- * The built-in table is keyed by NETWORK, not by address, so an overridden
- * contract would be scanned from the canonical deployment's block — almost
- * certainly past its own mint, yielding an empty chain and then the
- * "Incomplete log" verdict, for a companion that is perfectly fine.
- */
-function deployBlock(networkKey: keyof typeof LUMEN_COMPANION_DEPLOY_BLOCK): bigint {
-  if (ADDRESS_OVERRIDE && DEPLOY_BLOCK_OVERRIDE) {
-    try {
-      return BigInt(DEPLOY_BLOCK_OVERRIDE);
-    } catch {
-      // Unparseable — fall through to the built-in rather than throw on a page
-      // whose job is to render for strangers.
-    }
-  }
-  return LUMEN_COMPANION_DEPLOY_BLOCK[networkKey];
-}
-
 async function readCompanionProof(address: Address): Promise<CompanionProof> {
   const net = activeNetwork();
   const contractAddress = resolveCompanionAddress(net.key, ADDRESS_OVERRIDE);
@@ -233,7 +213,7 @@ async function readCompanionProof(address: Address): Promise<CompanionProof> {
     publicClient,
     contractAddress,
     tokenId,
-    deployBlock(net.key),
+    resolveCompanionDeployBlock(net.key, ADDRESS_OVERRIDE, DEPLOY_BLOCK_OVERRIDE),
   );
 
   const chain = buildAnchorChain(mint, anchors);

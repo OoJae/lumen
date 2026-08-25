@@ -892,6 +892,37 @@ export function resolveCompanionAddress(
 }
 
 /**
+ * Where to start scanning this deployment's event log.
+ *
+ * Kept beside `resolveCompanionAddress` because the two are coupled and were
+ * getting resolved separately. `LUMEN_COMPANION_DEPLOY_BLOCK` is keyed by
+ * NETWORK, not by address, so an overridden contract was scanned from the
+ * canonical deployment's block — almost certainly past its own mint, yielding
+ * an empty chain and then an "incomplete history" verdict for a companion that
+ * is perfectly fine. Two call sites had that coupling and neither knew it.
+ *
+ * A block override only applies when an ADDRESS override is also set: a custom
+ * start block against the built-in contract would skip real history for no
+ * reason. An unparseable override falls back rather than throwing — one of the
+ * callers renders a public page for strangers.
+ */
+export function resolveCompanionDeployBlock(
+  network: ZgNetworkKey,
+  addressOverride?: string,
+  blockOverride?: string,
+): bigint {
+  if (addressOverride?.trim() && blockOverride?.trim()) {
+    try {
+      const parsed = BigInt(blockOverride.trim());
+      if (parsed >= 0n) return parsed;
+    } catch {
+      // Not a number. Fall through to the built-in.
+    }
+  }
+  return LUMEN_COMPANION_DEPLOY_BLOCK[network];
+}
+
+/**
  * A 0G Storage rootHash is already 32 bytes of hex, so it drops straight into
  * the contract's bytes32 — but fail loudly if the SDK's format ever shifts.
  */

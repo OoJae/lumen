@@ -1,3 +1,4 @@
+import { LUMEN_COMPANION_DEPLOY_BLOCK, resolveCompanionDeployBlock } from '@lumen/shared';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -135,9 +136,60 @@ describe('a custom deployment reads its own contract', () => {
     expect(src).toContain('process.env.NEXT_PUBLIC_LUMEN_INFT_DEPLOY_BLOCK');
   });
 
-  it('falls back to the built-in block when only the address is overridden', () => {
-    // Guessing a start block would be worse than the canonical one: the page
-    // would scan from nowhere useful and report an empty chain.
-    expect(src).toContain('ADDRESS_OVERRIDE && DEPLOY_BLOCK_OVERRIDE');
+  it('passes BOTH overrides to the shared resolver, which decides', () => {
+    // The pairing rule moved into resolveCompanionDeployBlock so the in-app
+    // archive gets it too — it is asserted directly further down rather than
+    // by grepping for an implementation detail that now lives elsewhere.
+    expect(src).toContain('resolveCompanionDeployBlock(net.key, ADDRESS_OVERRIDE, DEPLOY_BLOCK_OVERRIDE)');
+  });
+});
+
+describe('resolveCompanionDeployBlock — the coupling both call sites had', () => {
+  it('returns the built-in block with no overrides', () => {
+    expect(resolveCompanionDeployBlock('mainnet')).toBe(LUMEN_COMPANION_DEPLOY_BLOCK.mainnet);
+    expect(resolveCompanionDeployBlock('testnet')).toBe(LUMEN_COMPANION_DEPLOY_BLOCK.testnet);
+  });
+
+  it('IGNORES a block override when the address is NOT overridden', () => {
+    // A custom start block against the canonical contract would skip real
+    // history for no reason — the built-in block is correct for it by
+    // definition.
+    expect(resolveCompanionDeployBlock('mainnet', undefined, '1')).toBe(
+      LUMEN_COMPANION_DEPLOY_BLOCK.mainnet,
+    );
+    expect(resolveCompanionDeployBlock('mainnet', '   ', '1')).toBe(
+      LUMEN_COMPANION_DEPLOY_BLOCK.mainnet,
+    );
+  });
+
+  it('honours the pair, which is the case that was broken', () => {
+    // The table is keyed by NETWORK, so an overridden contract used to be
+    // scanned from the canonical deployment's block — past its own mint,
+    // yielding an empty chain and then an "incomplete history" verdict for a
+    // companion that is fine.
+    expect(resolveCompanionDeployBlock('mainnet', '0xabc', '123')).toBe(123n);
+  });
+
+  it('falls back rather than throwing on an unparseable override', () => {
+    // One caller renders a public page for strangers; a bad env var must not
+    // 500 it.
+    for (const bad of ['not-a-number', '12.5', '', '  ', '-1']) {
+      expect(resolveCompanionDeployBlock('mainnet', '0xabc', bad), bad).toBe(
+        LUMEN_COMPANION_DEPLOY_BLOCK.mainnet,
+      );
+    }
+  });
+
+  it('both call sites use the shared resolver, so they cannot drift', () => {
+    // The in-app archive truthfully claims it shows exactly what a stranger
+    // sees. Two separate resolutions could make that false silently.
+    for (const rel of ['lib/0g/publicProof.ts', 'lib/hooks/useAnchorArchive.ts']) {
+      const src = readFileSync(join(process.cwd(), rel), 'utf8');
+      expect(src.length, `${rel} unreadable — this check would be vacuous`).toBeGreaterThan(0);
+      expect(src, rel).toContain('resolveCompanionDeployBlock(');
+      expect(src, `${rel} still indexes the table directly`).not.toMatch(
+        /LUMEN_COMPANION_DEPLOY_BLOCK\[/,
+      );
+    }
   });
 });
