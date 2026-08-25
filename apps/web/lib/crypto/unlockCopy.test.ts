@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { KeyTrust, UnlockRefusal, UnlockSource } from './keyTrust';
@@ -192,5 +195,26 @@ describe('trust values are exhaustive', () => {
   it('covers both', () => {
     const all: KeyTrust[] = ['proven', 'asserted'];
     for (const t of all) expect(exportTrustNotice(t).length).toBeGreaterThan(20);
+  });
+});
+
+describe('the UI may not claim Lumen never sees the encrypted snapshot', () => {
+  // It does see it. Browsers cannot reach 0G storage nodes directly (they are
+  // HTTP-only), so every byte of an upload transits /api/zg/indexer and
+  // /api/zg/node — Lumen's own relay. "Never sees" and "never touched" were
+  // false; "cannot read" is the true and still-strong claim.
+  const SURFACES = ['../../components/SealSheet.tsx', '../../components/StorageReceiptViewer.tsx'];
+
+  it.each(SURFACES)('%s does not claim Lumen never sees or touches the bytes', (rel) => {
+    const src = readFileSync(join(process.cwd(), rel.replace('../../', '')), 'utf8');
+    expect(src.length, `${rel} unreadable — this check would be vacuous`).toBeGreaterThan(0);
+    for (const phrase of ['never sees them', 'never touched it', 'never sees your snapshot']) {
+      expect(src, phrase).not.toContain(phrase);
+    }
+  });
+
+  it('the relay really is in the upload path, so the claim above is the honest one', () => {
+    const zg = readFileSync(join(process.cwd(), 'lib/storage/zgStorage.ts'), 'utf8');
+    expect(zg).toContain('/api/zg/indexer');
   });
 });

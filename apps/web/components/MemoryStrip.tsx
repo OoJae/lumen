@@ -8,7 +8,7 @@ import type { Companion } from '@/lib/hooks/useCompanion';
 import type { Seal } from '@/lib/hooks/useSeal';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
-import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
+import { insufficientFundsRemedy, pointerLostNotice } from '@/lib/storage/saveErrorCopy';
 import { refusalMessage } from '@/lib/crypto/unlockCopy';
 import { emptiedNotice, restoreSkippedNotice } from '@/lib/storage/deleteCopy';
 import { persistFailureNotice, undecryptableNotice } from '@/lib/crypto/unlockCopy';
@@ -189,6 +189,11 @@ export function MemoryStrip({
       {undecryptable && (
         <p className="w-full rounded-xl border border-border bg-canvas/40 px-3 py-2 text-xs leading-relaxed text-muted">
           {undecryptable}
+        </p>
+      )}
+      {memory.pointerLost && (
+        <p className="w-full rounded-xl border border-caution/40 bg-caution/10 px-3 py-2 text-xs leading-relaxed text-caution">
+          {pointerLostNotice(memory.save.receipt?.rootHash ?? null)}
         </p>
       )}
       {persistFailure && (

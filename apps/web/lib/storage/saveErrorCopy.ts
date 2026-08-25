@@ -55,3 +55,19 @@ export function insufficientFundsRemedy(
     address: address ?? undefined,
   };
 }
+
+/**
+ * The snapshot reached 0G but this device could not record where.
+ *
+ * The upload is real and was paid for, so this must never read as a failure —
+ * offering a retry here would charge the user a second time for the same bytes
+ * and add a second root to a chain whose value is that it is legible.
+ */
+export function pointerLostNotice(rootHash: string | null): string {
+  const root = rootHash ? `${rootHash.slice(0, 10)}…${rootHash.slice(-4)}` : 'the root above';
+  return (
+    `Saved to 0G — but this device could not record where. Your snapshot is on 0G at ${root}; ` +
+    'this browser will have forgotten the pointer after a reload, so copy that root hash now. ' +
+    'Do not save again: it would upload and pay a second time for the same entries.'
+  );
+}

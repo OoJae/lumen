@@ -218,7 +218,7 @@ export function SealSheet(props: SealSheetProps) {
               <Step
                 n={1}
                 label="Upload the encrypted snapshot to 0G Storage"
-                what="Your wallet pays the storage fee. The bytes are encrypted on this device first — Lumen never sees them."
+                what="Your wallet pays the storage fee. The bytes are encrypted on this device first, then relayed through Lumen to reach the 0G nodes — Lumen handles ciphertext it holds no key for."
                 done={uploadDone}
                 active={phase === 'saving' || phase === 'idle' || phase === 'save-failed'}
               />

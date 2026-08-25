@@ -178,9 +178,10 @@ export function StorageReceiptViewer({
         <p className="mt-4 rounded-xl border border-border bg-canvas/40 p-3 text-xs leading-relaxed text-muted">
           <span className="mb-1 block font-medium text-ink">What this means — honestly</span>
           This snapshot was encrypted on your device with a key only your wallet can derive, then
-          uploaded and paid for by your wallet — Lumen never touched it and cannot read it. What
-          is public: your address saved <em>something</em> of this (padded) size at this time.
-          The content is not.
+          uploaded and paid for by your wallet. The bytes pass through Lumen&apos;s relay on the way
+          to the 0G nodes — a browser cannot reach those nodes directly — so Lumen handles
+          ciphertext it holds no key for, and keeps none of it. What is public: your address saved
+          <em>something</em> of this (padded) size at this time. The content is not.
         </p>
       </div>
     </div>

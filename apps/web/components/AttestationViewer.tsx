@@ -80,7 +80,12 @@ export function AttestationViewer({
                   : tone === 'verified'
                     ? 'Processed inside a hardware enclave'
                     : tone === 'muted'
-                      ? 'Checking the enclave signature…'
+                      ? // NOT "Checking the enclave signature…". That was written when
+                        // muted meant "in progress"; since verification became the
+                        // normal path for every visitor, muted is where a finished
+                        // check FAILED to complete — so it sat there, permanently,
+                        // claiming to still be working.
+                        'Enclave registered on-chain — this response unverified'
                       : 'Mock response — no live enclave'}
               </p>
             </div>
@@ -161,10 +166,12 @@ export function AttestationViewer({
               </>
             ) : (
               <>
-                This reflection ran in private trust mode inside the provider&apos;s enclave, but a
-                per-request signature was not confirmed on this device
-                {proof ? ' — the check did not pass' : ' (the provider expires signatures)'}. The
-                trust-mode attestation still applies; newer reflections verify automatically.
+                Lumen asks for private trust mode on every call, and nothing in the response
+                proves the provider honoured it — a header is a request, not an attestation. What
+                is checkable is that this provider is registered on-chain as running the model
+                inside a TEE. A per-request signature was not confirmed on this device
+                {proof ? ' — the check did not pass' : ' (the provider expires signatures)'}, so
+                this reflection rests on that registration rather than on a proof.
               </>
             )}
           </div>

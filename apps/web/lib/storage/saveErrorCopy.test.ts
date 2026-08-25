@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ZG_MAINNET, ZG_TESTNET } from '@lumen/shared';
 
-import { insufficientFundsRemedy } from './saveErrorCopy';
+import { insufficientFundsRemedy, pointerLostNotice } from './saveErrorCopy';
 
 const ADDRESS = '0xbB05f3Fe1cC3bdB5CCC719C634f9bD0751007500';
 
@@ -48,5 +48,29 @@ describe('insufficientFundsRemedy — mainnet', () => {
 
   it('omits the address when no wallet is connected rather than printing null', () => {
     expect(insufficientFundsRemedy(ZG_MAINNET, null).address).toBeUndefined();
+  });
+});
+
+describe('pointerLostNotice', () => {
+  // The upload is done and paid for. This notice exists so the UI never offers
+  // a retry that would charge the user twice for the same bytes.
+  const n = pointerLostNotice('0x94f51264d5288f3312345678abcdef0011223344556677889900aabbccddeeff');
+
+  it('says the save SUCCEEDED, not that it failed', () => {
+    expect(n).toContain('Saved to 0G');
+    expect(n.toLowerCase()).not.toContain('failed');
+  });
+
+  it('tells the user not to save again, and why', () => {
+    expect(n).toContain('Do not save again');
+    expect(n).toContain('pay a second time');
+  });
+
+  it('gives them the root hash, because the device will forget it', () => {
+    expect(n).toContain('0x94f51264');
+  });
+
+  it('degrades honestly with no root to show', () => {
+    expect(pointerLostNotice(null)).toContain('the root above');
   });
 });

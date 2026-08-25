@@ -120,6 +120,13 @@ export interface JournalMemory {
   undecryptableCount: number;
   /** Entries whose local write FAILED. They render, but a reload loses them. */
   persistFailureCount: number;
+  /**
+   * True when a snapshot uploaded to 0G successfully but the local pointer
+   * write failed. The save is real and paid for; this device just will not
+   * remember it across a reload, so the UI must show the root hash rather than
+   * offer a retry that would pay twice.
+   */
+  pointerLost: boolean;
   save: {
     state: SaveState;
     error: SaveError | null;
@@ -190,6 +197,8 @@ export function useJournalMemory(): JournalMemory {
    * gone on reload. deleteTurn already did this correctly; the write path did not.
    */
   const [persistFailureCount, setPersistFailureCount] = useState(0);
+  /** The snapshot reached 0G but this device could not remember where. */
+  const [pointerLost, setPointerLost] = useState(false);
 
   const turnsRef = useRef<RecallableTurn[]>(turns);
   turnsRef.current = turns;
@@ -579,10 +588,32 @@ export function useJournalMemory(): JournalMemory {
         // ahead of your anchor" as a fact instead of a guess.
         prevRootHash: snapshot.prevRootHash,
       };
-      await db.setPointer(forWallet, networkKey, nextReceipt);
+      /**
+       * The upload above is DONE and PAID FOR. Everything from here is
+       * bookkeeping, and none of it may be allowed to throw away the receipt.
+       *
+       * This used to be `await db.setPointer(...)` on the success path, so a
+       * rejected IndexedDB write — quota exceeded, a private window, a corrupted
+       * store — fell into the catch below, discarded `nextReceipt` including its
+       * rootHash, and showed "Save failed" over a snapshot that was sitting on
+       * 0G. The retry button then uploaded and paid a second time, for the same
+       * bytes, producing a second root and a pointless extra link in a chain
+       * whose whole value is that it is legible.
+       *
+       * So: React state first, because that is what the UI, the seal flow and
+       * the receipt viewer read; then the durable write, whose failure is
+       * surfaced rather than fatal.
+       */
       setReceipt(nextReceipt);
       setForeignReceipt(null);
       setSaveState('idle');
+      let pointerPersisted = true;
+      try {
+        await db.setPointer(forWallet, networkKey, nextReceipt);
+      } catch {
+        pointerPersisted = false;
+      }
+      setPointerLost(!pointerPersisted);
       return nextReceipt;
     } catch (err) {
       const { InsufficientFundsError } = await zg();
@@ -782,6 +813,7 @@ export function useJournalMemory(): JournalMemory {
       reportSnapshot,
       undecryptableCount,
       persistFailureCount,
+      pointerLost,
       save,
       restoreFromRoot,
       verifyOnZg,
@@ -805,6 +837,7 @@ export function useJournalMemory(): JournalMemory {
       reportSnapshot,
       undecryptableCount,
       persistFailureCount,
+      pointerLost,
       save,
       restoreFromRoot,
       verifyOnZg,
