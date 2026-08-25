@@ -21,22 +21,54 @@
  * key — and a typo cannot forge it. So: ciphertext is the authority, and the
  * KCV is demoted to a cache used only when there is no ciphertext to ask.
  *
- * No stored provenance flag, and therefore no migration: the decision is
- * derived from what the database holds AT UNLOCK TIME. An existing user with
- * data lands on `proven-data` and sees exactly today's behaviour.
+ * The decision is derived from what the database holds AT UNLOCK TIME. An
+ * existing user with data lands on `proven-data` and sees exactly today's
+ * behaviour.
+ *
+ * SECOND INVERSION, found in production. The first version of this module
+ * carried no provenance on the KCV, and that let the inversion reappear one
+ * unlock later. On a device with no ciphertext, `no-evidence` + `signature`
+ * writes a bootstrap KCV so non-determinism can be detected next time. But the
+ * NEXT unlock then found `kcv === 'ok'`, called that `proven-kcv`, and admitted
+ * the key as `proven` — on the strength of a token the device had minted from
+ * an unverified signature fourteen minutes earlier. All it actually proves is
+ * that the same wallet signed the same way twice. That is a determinism check,
+ * not a journal check, and the user it was observed on had their real journal
+ * anchored on 0G and never once decrypted on that device.
+ *
+ * So the KCV now records HOW it was written, in its own plaintext:
+ *
+ *   proven    — written by a key that decrypted real wallet-bound ciphertext
+ *   bootstrap — written by an unverified signature on an empty device
+ *
+ * Matching a `proven` KCV is real evidence. Matching a `bootstrap` KCV means
+ * only "your wallet is signing consistently", which keeps the key `asserted`
+ * until real data confirms it. A legacy KCV with no marker is read as
+ * `bootstrap`, which is the conservative direction: the cost is one honest
+ * notice, and the first successful decrypt rewrites it as `proven`.
  */
 import { decryptBytes, parseAad, type EncryptedEnvelope } from './encrypt';
 
 export type UnlockSource = 'signature' | 'recovery';
-export type KcvStatus = 'ok' | 'bad' | 'none';
+/** How a stored KCV was minted. Legacy KCVs carry no marker and read as
+ *  'bootstrap' — see the header. */
+export type KcvProvenance = 'proven' | 'bootstrap';
+export type KcvStatus = 'ok-proven' | 'ok-bootstrap' | 'bad' | 'none';
 export type DataVerdict = 'proven' | 'refuted' | 'no-data';
 
 /** What this device can prove, strongest first. */
 export type KeyEvidence =
   /** An authenticated decrypt of real wallet-bound ciphertext succeeded. */
   | 'proven-data'
-  /** Matches the stored KCV; this device holds no other ciphertext. */
+  /** Matches a KCV that was itself written by a key proven against real data,
+   *  and this device holds no other ciphertext. */
   | 'proven-kcv'
+  /**
+   * Matches a KCV that was written by an unverified signature on an empty
+   * device. Proves the wallet is signing consistently and NOTHING about whether
+   * this key opens the journal — which may be sitting on 0G, untouched.
+   */
+  | 'bootstrap-kcv'
   /** This device holds ciphertext and none of it decrypts. */
   | 'refuted-data'
   /** The KCV disagrees, and no data corroborates it either way. */
@@ -53,7 +85,8 @@ export type UnlockRefusal =
   | 'recovery-mismatch-data';
 
 export type UnlockDecision =
-  | { admit: true; trust: KeyTrust; writeKcv: boolean }
+  /** `writeKcv` names the provenance to stamp, or null to leave the KCV alone. */
+  | { admit: true; trust: KeyTrust; writeKcv: KcvProvenance | null }
   | { admit: false; refusal: UnlockRefusal; nextState: 'mismatch' | 'locked' };
 
 /** One candidate artifact to try a key against. `aadId` is the exact id the
@@ -107,10 +140,36 @@ export async function probeArtifacts(
   return tried === 0 ? 'no-data' : 'refuted';
 }
 
+/** The constant every KCV plaintext starts with. */
+export const KCV_PLAINTEXT_V1 = 'lumen-kcv-v1';
+
+/** What to encrypt when writing a KCV, provenance included. */
+export function kcvPlaintext(provenance: KcvProvenance): string {
+  return `${KCV_PLAINTEXT_V1}:${provenance}`;
+}
+
+/**
+ * What a DECRYPTED KCV plaintext is worth. Callers pass 'none' themselves when
+ * no KCV exists, and 'bad' when the decrypt threw.
+ *
+ * A bare `lumen-kcv-v1` predates the provenance marker and could have been
+ * written either way, so it reads as `ok-bootstrap`. That is the conservative
+ * direction: the cost is one honest "restore to check this key" notice, and the
+ * first successful decrypt of real data rewrites it as proven. Reading it the
+ * other way would re-open the exact hole this marker closes.
+ */
+export function readKcvPlaintext(text: string): Extract<KcvStatus, 'ok-proven' | 'ok-bootstrap' | 'bad'> {
+  if (text === kcvPlaintext('proven')) return 'ok-proven';
+  if (text === kcvPlaintext('bootstrap') || text === KCV_PLAINTEXT_V1) return 'ok-bootstrap';
+  // Decrypted, but not to anything we ever wrote.
+  return 'bad';
+}
+
 export function evidenceFrom(data: DataVerdict, kcv: KcvStatus): KeyEvidence {
   if (data === 'proven') return 'proven-data';
   if (data === 'refuted') return 'refuted-data';
-  if (kcv === 'ok') return 'proven-kcv';
+  if (kcv === 'ok-proven') return 'proven-kcv';
+  if (kcv === 'ok-bootstrap') return 'bootstrap-kcv';
   if (kcv === 'bad') return 'refuted-kcv';
   return 'no-evidence';
 }
@@ -133,9 +192,16 @@ export function evidenceFrom(data: DataVerdict, kcv: KcvStatus): KeyEvidence {
 export function decideUnlock(source: UnlockSource, evidence: KeyEvidence): UnlockDecision {
   switch (evidence) {
     case 'proven-data':
-      return { admit: true, trust: 'proven', writeKcv: true };
+      return { admit: true, trust: 'proven', writeKcv: 'proven' };
     case 'proven-kcv':
-      return { admit: true, trust: 'proven', writeKcv: false };
+      return { admit: true, trust: 'proven', writeKcv: null };
+    case 'bootstrap-kcv':
+      // The wallet is signing consistently. That is worth knowing and it is not
+      // proof: nothing here has ever been opened by this key. Stay `asserted`
+      // so the UI keeps asking for the restore that would settle it, and leave
+      // the marker alone — re-stamping it `proven` would launder the bootstrap
+      // into evidence, which is the exact bug this branch exists to stop.
+      return { admit: true, trust: 'asserted', writeKcv: null };
     case 'refuted-data':
       return source === 'signature'
         ? { admit: false, refusal: 'signature-mismatch-data', nextState: 'mismatch' }
@@ -145,14 +211,15 @@ export function decideUnlock(source: UnlockSource, evidence: KeyEvidence): Unloc
     case 'refuted-kcv':
       return source === 'signature'
         ? { admit: false, refusal: 'signature-mismatch-kcv', nextState: 'mismatch' }
-        : { admit: true, trust: 'asserted', writeKcv: false };
+        : { admit: true, trust: 'asserted', writeKcv: null };
     case 'no-evidence':
       return source === 'signature'
         ? // A revocable bootstrap: the KCV is written so non-determinism can be
-          // detected next time, but the session is only `asserted`, and a
-          // recovery key can still overrule it (see `refuted-kcv` above).
-          { admit: true, trust: 'asserted', writeKcv: true }
-        : { admit: true, trust: 'asserted', writeKcv: false };
+          // detected next time, but the session is only `asserted`, a recovery
+          // key can still overrule it (see `refuted-kcv` above), and it is
+          // stamped `bootstrap` so a later unlock cannot mistake it for proof.
+          { admit: true, trust: 'asserted', writeKcv: 'bootstrap' }
+        : { admit: true, trust: 'asserted', writeKcv: null };
   }
 }
 
@@ -167,5 +234,6 @@ export type ExportVerdict = { allow: true; trust: KeyTrust } | { allow: false };
  */
 export function decideExport(evidence: KeyEvidence): ExportVerdict {
   if (evidence === 'refuted-data' || evidence === 'refuted-kcv') return { allow: false };
-  return { allow: true, trust: evidence === 'no-evidence' ? 'asserted' : 'proven' };
+  const unchecked = evidence === 'no-evidence' || evidence === 'bootstrap-kcv';
+  return { allow: true, trust: unchecked ? 'asserted' : 'proven' };
 }

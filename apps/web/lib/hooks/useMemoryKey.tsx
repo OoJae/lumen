@@ -62,7 +62,11 @@ import {
   decideExport,
   decideUnlock,
   evidenceFrom,
+  kcvPlaintext,
   probeArtifacts,
+  readKcvPlaintext,
+  type KcvProvenance,
+  type KcvStatus,
   type KeyEvidence,
   type KeyTrust,
   type UnlockSource,
@@ -70,7 +74,10 @@ import {
 import { refusalMessage, unlockNotice, type UnlockNotice } from '@/lib/crypto/unlockCopy';
 import { getKcv, iterateCiphertext, putKcv } from '@/lib/storage/db';
 
-const KCV_PLAINTEXT = 'lumen-kcv-v1';
+// The KCV plaintext carries HOW it was written (`…:proven` / `…:bootstrap`).
+// Both the writing and the reading live in keyTrust.ts, where they are tested —
+// including the legacy bare-constant case, which is where getting it wrong
+// would silently hand an unchecked key the word "proven".
 
 export type MemoryKeyState = 'no-wallet' | 'locked' | 'unlocking' | 'unlocked' | 'mismatch';
 
@@ -129,9 +136,17 @@ const MemoryKeyContext = createContext<MemoryKeyContextValue | null>(null);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** 'ok' = key matches the stored check value; 'bad' = it doesn't; 'none' = no
- *  KCV exists yet. A cache, not an authority — see the header. */
-async function verifyKcv(wallet: string, key: CryptoKey): Promise<'ok' | 'bad' | 'none'> {
+/**
+ * Does the candidate match the stored check value, and what was that value
+ * worth? A cache, not an authority — see the header.
+ *
+ * `ok-proven` means the KCV was written by a key that had decrypted real
+ * ciphertext. `ok-bootstrap` means it was written by an unverified signature on
+ * an empty device, so matching it proves only that the wallet signs
+ * consistently. Conflating those two is what let this device call an unchecked
+ * key "proven" on its second unlock.
+ */
+async function verifyKcv(wallet: string, key: CryptoKey): Promise<KcvStatus> {
   const existing = await getKcv(wallet);
   if (!existing) return 'none';
   try {
@@ -140,16 +155,20 @@ async function verifyKcv(wallet: string, key: CryptoKey): Promise<'ok' | 'bad' |
       keyVersion: CURRENT_KEY_VERSION,
       aadId: wallet,
     });
-    return decoder.decode(plain) === KCV_PLAINTEXT ? 'ok' : 'bad';
+    return readKcvPlaintext(decoder.decode(plain));
   } catch {
     return 'bad';
   }
 }
 
-async function createKcv(wallet: string, key: CryptoKey): Promise<void> {
+async function createKcv(
+  wallet: string,
+  key: CryptoKey,
+  provenance: KcvProvenance,
+): Promise<void> {
   const envelope = await encryptBytes(
     key,
-    encoder.encode(KCV_PLAINTEXT),
+    encoder.encode(kcvPlaintext(provenance)),
     'kcv',
     wallet,
     CURRENT_KEY_VERSION,
@@ -227,7 +246,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       }
 
       if (decision.writeKcv) {
-        await createKcv(forWallet, candidate).catch(() => {
+        await createKcv(forWallet, candidate, decision.writeKcv).catch(() => {
           // A KCV is an optimisation. Failing to cache it must never cost the
           // user an unlock they have already earned.
         });
@@ -277,7 +296,10 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
     if (!key || !wallet) return;
     // `unlockNotice` returns null for a proven key, so the notice clears itself.
     setTrust((prev) => (prev === 'proven' ? prev : 'proven'));
-    await createKcv(wallet, key).catch(() => {});
+    // Stamped `proven`: this key just opened real wallet-bound ciphertext, so a
+    // later unlock on this device may rely on it. This is the ONLY place a
+    // bootstrap KCV is promoted, and it takes an actual decrypt to get here.
+    await createKcv(wallet, key, 'proven').catch(() => {});
   }, [wallet]);
 
   const lock = useCallback(() => {

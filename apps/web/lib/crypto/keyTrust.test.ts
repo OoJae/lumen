@@ -6,7 +6,10 @@ import {
   decideExport,
   decideUnlock,
   evidenceFrom,
+  kcvPlaintext,
+  KCV_PLAINTEXT_V1,
   probeArtifacts,
+  readKcvPlaintext,
   type DataVerdict,
   type KcvStatus,
   type KeyEvidence,
@@ -34,47 +37,80 @@ async function turnArtifact(key: CryptoKey, id: string, keyVersion = 1): Promise
 const ALL_EVIDENCE: KeyEvidence[] = [
   'proven-data',
   'proven-kcv',
+  'bootstrap-kcv',
   'refuted-data',
   'refuted-kcv',
   'no-evidence',
 ];
 
+const ALL_KCV: KcvStatus[] = ['ok-proven', 'ok-bootstrap', 'bad', 'none'];
+
 describe('evidenceFrom — ciphertext outranks the KCV', () => {
   it('lets real data decide, whatever the KCV says', () => {
-    for (const kcv of ['ok', 'bad', 'none'] as KcvStatus[]) {
+    for (const kcv of ALL_KCV) {
       expect(evidenceFrom('proven', kcv), kcv).toBe('proven-data');
       expect(evidenceFrom('refuted', kcv), kcv).toBe('refuted-data');
     }
   });
 
   it('falls back to the KCV only when there is no data', () => {
-    expect(evidenceFrom('no-data', 'ok')).toBe('proven-kcv');
+    expect(evidenceFrom('no-data', 'ok-proven')).toBe('proven-kcv');
+    expect(evidenceFrom('no-data', 'ok-bootstrap')).toBe('bootstrap-kcv');
     expect(evidenceFrom('no-data', 'bad')).toBe('refuted-kcv');
     expect(evidenceFrom('no-data', 'none')).toBe('no-evidence');
+  });
+
+  it('SECOND INVERSION: a matching KCV is only proof if the KCV was proof', () => {
+    // Observed in production. Unlock #1 on an empty device writes a bootstrap
+    // KCV from an unverified signature. Unlock #2 matched it and called the key
+    // `proven` — on a device where nothing had ever been decrypted, for a user
+    // whose real journal was sitting anchored on 0G. All a bootstrap match
+    // establishes is that the wallet signs consistently.
+    expect(evidenceFrom('no-data', 'ok-bootstrap')).not.toBe('proven-kcv');
   });
 });
 
 describe('decideUnlock — the full table', () => {
   const table: Array<[UnlockSource, KeyEvidence, string]> = [
-    ['signature', 'proven-data', 'admit proven writeKcv'],
+    ['signature', 'proven-data', 'admit proven writeKcv:proven'],
     ['signature', 'proven-kcv', 'admit proven'],
+    ['signature', 'bootstrap-kcv', 'admit asserted'],
     ['signature', 'refuted-data', 'refuse signature-mismatch-data mismatch'],
     ['signature', 'refuted-kcv', 'refuse signature-mismatch-kcv mismatch'],
-    ['signature', 'no-evidence', 'admit asserted writeKcv'],
-    ['recovery', 'proven-data', 'admit proven writeKcv'],
+    ['signature', 'no-evidence', 'admit asserted writeKcv:bootstrap'],
+    ['recovery', 'proven-data', 'admit proven writeKcv:proven'],
     ['recovery', 'proven-kcv', 'admit proven'],
+    ['recovery', 'bootstrap-kcv', 'admit asserted'],
     ['recovery', 'refuted-data', 'refuse recovery-mismatch-data locked'],
     ['recovery', 'refuted-kcv', 'admit asserted'],
     ['recovery', 'no-evidence', 'admit asserted'],
   ];
 
-  it('matches the design table in all ten cells', () => {
+  it('matches the design table in all twelve cells', () => {
     for (const [source, evidence, expected] of table) {
       const d = decideUnlock(source, evidence);
       const actual = d.admit
-        ? `admit ${d.trust}${d.writeKcv ? ' writeKcv' : ''}`
+        ? `admit ${d.trust}${d.writeKcv ? ` writeKcv:${d.writeKcv}` : ''}`
         : `refuse ${d.refusal} ${d.nextState}`;
       expect(actual, `${source} + ${evidence}`).toBe(expected);
+    }
+  });
+
+  it('covers every cell — the table cannot silently miss a new evidence value', () => {
+    expect(table).toHaveLength(2 * ALL_EVIDENCE.length);
+  });
+
+  it('THE SECOND FIX: matching a bootstrap KCV never reaches `proven`', () => {
+    for (const source of ['signature', 'recovery'] as UnlockSource[]) {
+      const d = decideUnlock(source, 'bootstrap-kcv');
+      expect(d.admit, source).toBe(true);
+      if (d.admit) {
+        expect(d.trust, source).toBe('asserted');
+        // And it must NOT re-stamp: promoting the bootstrap to `proven` here
+        // would launder an unverified signature into evidence, which is exactly
+        // the inversion this module exists to prevent.
+        expect(d.writeKcv, source).toBeNull();
+      }
     }
   });
 
@@ -86,7 +122,7 @@ describe('decideUnlock — the full table', () => {
     if (d.admit) {
       expect(d.trust).toBe('asserted');
       // Must NOT write: a typo here would become the device's law.
-      expect(d.writeKcv).toBe(false);
+      expect(d.writeKcv).toBeNull();
     }
   });
 
@@ -95,14 +131,14 @@ describe('decideUnlock — the full table', () => {
     // silently became the KCV and the correct recovery key was rejected forever.
     const d = decideUnlock('recovery', 'refuted-kcv');
     expect(d.admit).toBe(true);
-    if (d.admit) expect(d.writeKcv).toBe(false);
+    if (d.admit) expect(d.writeKcv).toBeNull();
   });
 
   it('THE HEAL: proving against real data always rewrites the KCV', () => {
     for (const source of ['signature', 'recovery'] as UnlockSource[]) {
       const d = decideUnlock(source, 'proven-data');
       expect(d.admit).toBe(true);
-      if (d.admit) expect(d.writeKcv).toBe(true);
+      if (d.admit) expect(d.writeKcv).toBe('proven');
     }
   });
 
@@ -224,5 +260,53 @@ describe('decideExport', () => {
     // overwrite a good backup — silent data loss.
     expect(decideExport('refuted-data').allow).toBe(false);
     expect(decideExport('refuted-kcv').allow).toBe(false);
+  });
+});
+
+describe('the KCV plaintext carries its own provenance', () => {
+  it('round-trips both markers', () => {
+    expect(readKcvPlaintext(kcvPlaintext('proven'))).toBe('ok-proven');
+    expect(readKcvPlaintext(kcvPlaintext('bootstrap'))).toBe('ok-bootstrap');
+  });
+
+  it('reads a LEGACY bare KCV as a bootstrap, never as proof', () => {
+    // Written before the marker existed, so its provenance is unknowable. The
+    // conservative reading costs one honest notice; the other reading hands an
+    // unchecked key the word "proven", which is the bug this closes.
+    expect(readKcvPlaintext(KCV_PLAINTEXT_V1)).toBe('ok-bootstrap');
+    expect(evidenceFrom('no-data', readKcvPlaintext(KCV_PLAINTEXT_V1))).toBe('bootstrap-kcv');
+    const d = decideUnlock('signature', 'bootstrap-kcv');
+    expect(d.admit && d.trust).toBe('asserted');
+  });
+
+  it('treats anything else as a mismatch', () => {
+    for (const junk of ['', 'lumen-kcv-v2', 'lumen-kcv-v1:', 'lumen-kcv-v1:PROVEN', 'proven']) {
+      expect(readKcvPlaintext(junk), junk).toBe('bad');
+    }
+  });
+
+  it('the two markers are distinct, so one cannot be read as the other', () => {
+    expect(kcvPlaintext('proven')).not.toBe(kcvPlaintext('bootstrap'));
+    // And neither equals the legacy constant, or upgrading would be a no-op.
+    expect(kcvPlaintext('proven')).not.toBe(KCV_PLAINTEXT_V1);
+  });
+
+  it('THE REGRESSION, end to end: bootstrap then re-unlock stays asserted', () => {
+    // Exactly what was observed. Unlock #1 on an empty device:
+    const first = decideUnlock('signature', evidenceFrom('no-data', 'none'));
+    expect(first.admit && first.trust).toBe('asserted');
+    expect(first.admit && first.writeKcv).toBe('bootstrap');
+
+    // Unlock #2 matches the KCV that unlock #1 just wrote. Before this fix that
+    // was 'proven-kcv' and the user was told nothing at all, on a device where
+    // their journal had never once been decrypted.
+    const stored = readKcvPlaintext(kcvPlaintext(first.admit ? first.writeKcv! : 'bootstrap'));
+    const second = decideUnlock('signature', evidenceFrom('no-data', stored));
+    expect(second.admit && second.trust).toBe('asserted');
+
+    // And after a restore actually decrypts something, it IS proven.
+    const third = decideUnlock('signature', evidenceFrom('proven', 'none'));
+    expect(third.admit && third.trust).toBe('proven');
+    expect(third.admit && third.writeKcv).toBe('proven');
   });
 });
