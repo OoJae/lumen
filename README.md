@@ -141,10 +141,11 @@ You will also see plaintext keys and timestamps beside it; those are enumerated
 exhaustively in [docs/privacy-model.md](docs/privacy-model.md), and seeing them
 is the point of checking rather than a contradiction of it.
 
-**5. The tests pass.** `pnpm test` (457 tests, `apps/web`) and
-`pnpm --filter @lumen/contracts test` (20 tests). There is no CI workflow in this
-repo — the suite is run locally before every commit, and saying so is cheaper
-than implying a pipeline that does not exist.
+**5. The tests pass.** `pnpm test` (`apps/web`) and `pnpm --filter @lumen/contracts test`
+(Hardhat). Both run in CI on every push and pull request — see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml), which also runs `pnpm lint`
+and `pnpm typecheck`. No counts are quoted here on purpose: a number written in
+two places goes stale in one of them, and this section had two that disagreed.
 
 ## Architecture (summary)
 
@@ -186,7 +187,7 @@ cp .env.example apps/web/.env.local
 pnpm dev          # → http://localhost:3000
 ```
 
-Other scripts: `pnpm build` · `pnpm start` · `pnpm test` (141 unit tests) ·
+Other scripts: `pnpm build` · `pnpm start` · `pnpm test` · `pnpm lint` ·
 `pnpm typecheck`.
 
 ### Contracts

@@ -1,0 +1,63 @@
+# Lint, typecheck, tests and a production build, on every push and PR.
+#
+# This exists because of a real regression: the `lint` script was deleted from
+# both package.json files and nobody noticed for weeks, so `tsc` was the only
+# static analysis running. The two worst bugs of a recent review — a missing
+# hook dependency that silently disabled a key-promotion path, and a hook called
+# after an early return — are both rules that ship free with
+# next/core-web-vitals. Nothing enforced them, so they were not enforced.
+#
+# No secrets: apps/web/app/page.tsx is force-dynamic and reads env per request,
+# next.config.mjs only throws on an *invalid* NEXT_PUBLIC_ZG_NETWORK rather than
+# an absent one, and the contracts tests run against a local Hardhat node. This
+# is green on a fork with no configuration at all, which is the point — the
+# claims in the README are meant to be checkable by a stranger.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to match `packageManager` in the root package.json. pnpm 11
+      # refuses build scripts unless allowed in pnpm-workspace.yaml, which is
+      # where this repo records them, annotated.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Contract tests
+        run: pnpm contracts:test
+
+      # Last, because it is the slowest and the least likely to fail alone.
+      - name: Production build
+        run: pnpm build

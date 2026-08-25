@@ -148,10 +148,17 @@ perform, and promotes itself to proven the moment a restored snapshot decrypts,
 rewriting the KCV from proven material. Every branch lives in
 `apps/web/lib/crypto/keyTrust.ts` and is unit-tested cell by cell.
 
-The recovery-key **export is verified against the same authority before it is
-shown** — if the wallet's fresh signature doesn't reproduce the journal's key,
-Lumen refuses to export and tells you to keep your existing backup rather than
-hand you a key that cannot decrypt anything.
+The recovery-key **export is checked against whatever this device can check it
+against** — and the distinction matters. If the device holds ciphertext and the
+wallet's fresh signature does not open it, Lumen refuses the export outright and
+tells you to keep your existing backup rather than hand you a key that decrypts
+nothing. But on a device that holds nothing yet — a new laptop, a fresh profile,
+the case where you most need a backup — there is nothing to check against, so
+the export is **allowed and labelled unverified**, with a warning not to
+overwrite a backup you already have. Refusing there would leave a new journal
+with no way to ever make one. `decideExport` in
+`apps/web/lib/crypto/keyTrust.ts` is the whole rule, and it refuses only on
+evidence that actively REFUTES the key.
 
 The signature itself never enters any cache. Lumen calls `signMessage` from
 `wagmi/actions` rather than the `useSignMessage` hook, so no TanStack mutation —

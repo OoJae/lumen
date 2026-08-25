@@ -3,9 +3,13 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 /**
- * Wave 1 wallet stub. Connecting does nothing yet — it's the "save & own" moment
- * we convert on in Wave 2 (encrypted storage) and Wave 3 (mint your companion as
- * an ERC-7857 INFT). Kept deliberately quiet in the UI.
+ * The wallet control.
+ *
+ * This used to be a stub, and the comment saying so outlived it by two waves:
+ * connecting now derives the key that encrypts the journal, signs and pays for
+ * every 0G Storage upload, and mints and anchors the companion INFT. Reflection
+ * still needs no wallet at all — that stays deliberate, and is why this control
+ * is quiet rather than a gate.
  */
 export function ConnectWallet() {
   return (
@@ -41,7 +45,7 @@ export function ConnectWallet() {
               <button
                 type="button"
                 onClick={openConnectModal}
-                title="Connect a wallet to save & own your companion (Wave 2–3)"
+                title="Connect a wallet to encrypt and save your journal to 0G, and to mint your companion"
                 className="rounded-full border border-border px-3.5 py-1.5 text-sm font-medium text-muted transition-colors hover:border-accent/50 hover:text-ink"
               >
                 Save &amp; own
