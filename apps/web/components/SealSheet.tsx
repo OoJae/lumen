@@ -138,13 +138,6 @@ export function SealSheet(props: SealSheetProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose, busy]);
 
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, []);
-
   const twoStep = plan.kind === 'save-then-anchor';
   const uploadDone = phase !== 'idle' && phase !== 'saving' && phase !== 'save-failed';
   /**

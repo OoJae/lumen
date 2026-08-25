@@ -67,7 +67,15 @@ export function ReflectionCard({
         </p>
       </div>
 
-      <div>
+      {/*
+        The only aria-live in this app used to be on the voice button, so a
+        screen-reader user pressed Cmd+Enter and then heard nothing at all —
+        not the start, not the tokens, not the end — for the whole round trip.
+        `polite` because a reflection is not an interruption; `atomic={false}`
+        so the stream is announced as it grows rather than re-read whole on
+        every token.
+      */}
+      <div role="status" aria-live="polite" aria-atomic="false">
         <p className="mb-1 text-[11px] uppercase tracking-[0.14em] text-accent/80">Lumen</p>
         {reflection ? (
           <p className={`writing whitespace-pre-wrap text-ink ${streaming ? 'caret' : ''}`}>

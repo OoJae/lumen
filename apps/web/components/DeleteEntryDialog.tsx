@@ -49,10 +49,8 @@ export function DeleteEntryDialog({
       if (e.key === 'Escape' && !busy) onClose();
     }
     document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
     };
   }, [onClose, busy]);
 

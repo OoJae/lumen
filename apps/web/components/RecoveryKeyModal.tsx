@@ -33,16 +33,32 @@ export function RecoveryKeyModal({
       if (e.key === 'Escape') onClose();
     }
     document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  /**
+   * The wipe is MOUNT-ONLY, and that is load-bearing.
+   *
+   * It used to share the effect above, keyed on `[onClose]` — and MemoryStrip
+   * passes `onClose={() => setOpen(null)}`, a fresh arrow every render. So any
+   * parent re-render ran this cleanup and threw the key away.
+   *
+   * The guaranteed trigger was revealing the key itself. `Reveal` opens a wallet
+   * signature popup; the popup takes and returns window focus; TanStack's
+   * default refetchOnWindowFocus refetches useCompanion's three reads (15s
+   * staleTime, long expired); Journal re-renders; MemoryStrip re-renders
+   * unmemoized; new arrow; cleanup; the key the user just paid a signature for
+   * vanished back to the "Reveal" button. Same shape as MemoryLibrary, which
+   * already splits its effects for this reason.
+   */
+  useEffect(() => {
     return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
       // Don't leave 32 bytes of key material in React state after the modal
       // closes; it is the one secret this component holds.
       setHex(null);
       setTrust(null);
     };
-  }, [onClose]);
+  }, []);
 
   async function reveal() {
     setBusy(true);

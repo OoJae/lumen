@@ -264,7 +264,10 @@ export function Journal({
         )}
 
         {status === 'error' && (
-          <p className="mt-4 rounded-xl border border-caution/40 bg-caution/10 px-3 py-2 text-sm leading-relaxed text-caution">
+          <p
+            role="alert"
+            className="mt-4 rounded-xl border border-caution/40 bg-caution/10 px-3 py-2 text-sm leading-relaxed text-caution"
+          >
             {error ?? 'Something went wrong'} — your words are still in the box, so nothing was
             lost. Try again.
           </p>

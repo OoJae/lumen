@@ -23,6 +23,44 @@ import { useEffect, useRef } from 'react';
  * `preferred` picks the initial target when the safest control is not the first
  * one in the DOM — the delete dialog wants "Keep it" focused, not "Delete".
  */
+/**
+ * Every open dialog, innermost last.
+ *
+ * Module-scoped because the Tab handler lives on `document`, so without it two
+ * open dialogs each see "focus is outside MY container" and each corrects it —
+ * on the same keypress. With MemoryLibrary and DeleteEntryDialog stacked (which
+ * is a normal flow: deleting from the library does not close the library), the
+ * library pulled focus in, the delete dialog then pulled it to its own first
+ * element, and both called preventDefault. Every Tab landed on the delete
+ * dialog's close button and every Shift+Tab on its last element, so "Keep it"
+ * and "Delete" could not be reached by keyboard at all — on a destructive
+ * dialog.
+ */
+const openDialogs: HTMLElement[] = [];
+
+/**
+ * Scroll-lock refcount.
+ *
+ * Each dialog used to set and clear `document.body.style.overflow` itself, so
+ * whichever one unmounted first unlocked the page while the other was still
+ * open and modal. Owned here now, released only when the last dialog closes.
+ */
+let scrollLocks = 0;
+let restoreOverflow = '';
+
+function lockScroll(): void {
+  if (scrollLocks === 0) {
+    restoreOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+  scrollLocks++;
+}
+
+function releaseScroll(): void {
+  scrollLocks = Math.max(0, scrollLocks - 1);
+  if (scrollLocks === 0) document.body.style.overflow = restoreOverflow;
+}
+
 const FOCUSABLE = [
   'a[href]',
   'button:not([disabled])',
@@ -48,6 +86,9 @@ export function useModalFocus<T extends HTMLElement>(options?: {
     // Whoever opened this. Captured before we move focus anywhere.
     const opener = document.activeElement as HTMLElement | null;
 
+    if (container) openDialogs.push(container);
+    lockScroll();
+
     function focusable(): HTMLElement[] {
       if (!container) return [];
       return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
@@ -62,6 +103,9 @@ export function useModalFocus<T extends HTMLElement>(options?: {
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Tab' || !container) return;
+      // Only the topmost dialog traps. Without this every stacked dialog
+      // corrects focus toward itself on the same keypress.
+      if (openDialogs[openDialogs.length - 1] !== container) return;
       const items = focusable();
       if (items.length === 0) {
         // Nothing to move to — keep focus here rather than letting it escape
@@ -90,6 +134,9 @@ export function useModalFocus<T extends HTMLElement>(options?: {
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
+      const at = container ? openDialogs.lastIndexOf(container) : -1;
+      if (at >= 0) openDialogs.splice(at, 1);
+      releaseScroll();
       // Return focus to the trigger. Guarded because the opener can be gone by
       // now — an entry deleted from the library takes its own delete button
       // with it.
@@ -98,4 +145,14 @@ export function useModalFocus<T extends HTMLElement>(options?: {
   }, [preferred, autoFocus]);
 
   return containerRef;
+}
+
+/** Test-only: how many dialogs currently hold the trap, innermost last. */
+export function __openDialogCount(): number {
+  return openDialogs.length;
+}
+
+/** Test-only: the outstanding scroll-lock refcount. */
+export function __scrollLockCount(): number {
+  return scrollLocks;
 }

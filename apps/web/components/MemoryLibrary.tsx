@@ -157,17 +157,6 @@ export function MemoryLibrary({
   const inputRef = useRef<HTMLInputElement>(null);
   const runId = useRef(0);
 
-  // Mount-only, and no longer focuses anything itself — useModalFocus owns
-  // that, and does it once. Kept apart from the Escape handler because
-  // `onClose` is an inline arrow in the parent, so bundling them re-ran this
-  // on every render and yanked focus back into the search box each time.
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, []);
-
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();

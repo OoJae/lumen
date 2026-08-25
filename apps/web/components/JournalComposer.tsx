@@ -71,9 +71,15 @@ export function JournalComposer({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         rows={3}
-        disabled={disabled}
+        // readOnly, NOT disabled. Disabling a focused element blurs it to
+        // <body>, and nothing here refocuses it — so submitting with the
+        // keyboard threw focus away for the entire several-second round trip.
+        // readOnly keeps the caret where the writer left it; the submit button
+        // below still carries the real `disabled`.
+        readOnly={disabled}
+        aria-busy={disabled}
         aria-label="Journal entry"
-        className="writing w-full resize-none bg-transparent text-ink outline-none placeholder:text-muted/70 disabled:opacity-60"
+        className={`writing w-full resize-none bg-transparent text-ink outline-none placeholder:text-muted/70 ${disabled ? 'opacity-60' : ''}`}
       />
       <div className="mt-3 flex items-center justify-between">
         <span className="flex items-center gap-2.5">
