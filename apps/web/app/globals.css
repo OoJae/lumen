@@ -120,6 +120,19 @@ body {
   animation: lumen-blink 1s step-end infinite;
 }
 
+/* Visible keyboard focus, everywhere, once.
+   There was no `focus-visible` rule anywhere in the app: interactive elements
+   signalled focus by tinting a 1px border, which is invisible at a glance and
+   absent entirely on the icon buttons and text links. `:where()` keeps this at
+   specificity 0, so any component that wants a different treatment still wins
+   without an `!important` arms race — and it costs no markup change in twenty
+   files. Mouse users never see it; `:focus-visible` is the point. */
+:where(a, button, input, textarea, select, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
 /* The marketing surfaces are always night.
    Not a preference override for its own sake: the whole landing is a lamp in a
    dark room, and a lamp on cream paper is just a stain. The journal itself

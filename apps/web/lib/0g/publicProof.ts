@@ -24,6 +24,10 @@ import { activeNetwork } from './network';
 import { agreesWithContract, buildAnchorChain, type AnchorChain } from './anchorHistory';
 import { readAnchorLogs } from './anchorLogs';
 
+// Re-exported from its leaf module so importing it does not drag this file's
+// viem + next/cache + RPC graph into a client bundle. See lib/0g/address.ts.
+export { parseAddress } from './address';
+
 /** A slow RPC must not hang the page — a partial proof beats a spinner. */
 const RPC_TIMEOUT_MS = 12_000;
 const INDEXER_TIMEOUT_MS = 6_000;
@@ -74,19 +78,6 @@ function client() {
     chain: activeChain(),
     transport: http(activeNetwork().rpcUrl, { timeout: RPC_TIMEOUT_MS }),
   });
-}
-
-/** Is this a syntactically valid EVM address? Checked before any RPC work. */
-export function parseAddress(raw: string): Address | null {
-  let value: string;
-  try {
-    value = decodeURIComponent(raw ?? '').trim();
-  } catch {
-    // decodeURIComponent throws URIError on a malformed escape (a lone '%').
-    // A junk URL must render "that isn't a wallet address", never a 500.
-    return null;
-  }
-  return /^0x[0-9a-fA-F]{40}$/.test(value) ? (value as Address) : null;
 }
 
 /**
