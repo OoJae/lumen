@@ -9,9 +9,10 @@ import type { Seal } from '@/lib/hooks/useSeal';
 import type { JournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useChainGuard } from '@/lib/hooks/useChainGuard';
 import { insufficientFundsRemedy } from '@/lib/storage/saveErrorCopy';
-import { restoreSkippedNotice } from '@/lib/storage/deleteCopy';
+import { refusalMessage } from '@/lib/crypto/unlockCopy';
+import { emptiedNotice, restoreSkippedNotice } from '@/lib/storage/deleteCopy';
 import { persistFailureNotice, undecryptableNotice } from '@/lib/crypto/unlockCopy';
-import { foreignPointerNotice } from '@/lib/storage/saveStatus';
+import { foreignPointerNotice, pendingChanges, unsavedChangeNotice } from '@/lib/storage/saveStatus';
 import { FundingRemedy } from './FundingRemedy';
 import { CalendarIcon, CloudCheckIcon, CompanionIcon, KeyIcon, LockIcon } from './icons';
 import { MintCompanionSheet } from './MintCompanionSheet';
@@ -128,8 +129,13 @@ export function MemoryStrip({
     return (
       <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3">
         <p className="text-sm text-caution">
-          This wallet signed differently than when your journal was encrypted (some smart-account
-          wallets do). Your data is intact — unlock it with your recovery key.
+          {/* "Your data is intact" used to be hardcoded here. On the
+              signature-mismatch-kcv path — the only one reachable on a device
+              holding no ciphertext — that claim is simply false, which is why
+              refusalMessage has a branch for it that carefully does not make it. */}
+          {memory.keyRefusal
+            ? refusalMessage(memory.keyRefusal)
+            : 'This wallet signed differently than when your journal was encrypted (some smart-account wallets do). Unlock with your recovery key.'}
         </p>
         <button
           type="button"
@@ -343,7 +349,18 @@ function SyncChip({
   memory: JournalMemory;
   onOpenReceipt: () => void;
 }) {
-  const { save, turns } = memory;
+  const { save, turns, deletions } = memory;
+
+  // Two helpers written to stop this chip telling a specific untruth, neither
+  // of which it called. `unsavedChangeNotice` exists so a change that is purely
+  // a deletion does not read as "new entries not yet saved" — the chip
+  // hardcoded that exact string. `emptiedNotice` speaks for the 'emptied'
+  // status, which syncStatus computes for the worst lie available here: the
+  // device holds nothing, the snapshot still holds entries, and the chip says
+  // the clean "Saved to 0G".
+  const changes = pendingChanges(turns.length, deletions.length, save.receipt);
+  const pending = unsavedChangeNotice(changes);
+
   if (save.state === 'saving') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted">
@@ -358,7 +375,11 @@ function SyncChip({
       <button
         type="button"
         onClick={onOpenReceipt}
-        title="View your 0G storage receipt"
+        title={
+          save.status === 'emptied' && save.receipt
+            ? emptiedNotice(save.receipt)
+            : 'View your 0G storage receipt'
+        }
         className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
           save.dirty
             ? 'border-border text-muted hover:border-accent/40'
@@ -366,7 +387,11 @@ function SyncChip({
         }`}
       >
         <CloudCheckIcon width={13} height={13} />
-        {save.dirty ? `On 0G: ${short} (new entries not yet saved)` : `Saved to 0G · ${short}`}
+        {save.status === 'emptied'
+          ? `On 0G: ${short} (this device is empty)`
+          : save.dirty
+            ? `On 0G: ${short}${pending ? ` (${pending})` : ''}`
+            : `Saved to 0G · ${short}`}
       </button>
     );
   }
@@ -745,7 +770,9 @@ function CompanionBlock({
           resumeInvite,
         );
       }
-      if (seal.nudge.tier !== 'none' && seal.plan.kind !== 'blocked') {
+      // 'strip' only. 'raised' has its own banner in Journal, immediately below
+      // this component, and admitting it here printed the same headline twice.
+      if (seal.nudge.tier === 'strip' && seal.plan.kind !== 'blocked') {
         return shell(<>{seal.nudge.headline}</>, sealInvite);
       }
       return txNotice ? (

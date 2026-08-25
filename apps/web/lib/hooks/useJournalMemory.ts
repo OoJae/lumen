@@ -45,7 +45,7 @@ import {
   type BoundedQueue,
 } from '@/lib/memory/embedQueue';
 import type { RecallableTurn } from '@/lib/memory/recall';
-import type { KeyTrust } from '@/lib/crypto/keyTrust';
+import type { KeyTrust, UnlockRefusal } from '@/lib/crypto/keyTrust';
 import type { UnlockNotice } from '@/lib/crypto/unlockCopy';
 import * as db from '@/lib/storage/db';
 import {
@@ -141,6 +141,9 @@ export interface JournalMemory {
    * anchored root, which is the case that has no local pointer.
    */
   reportSnapshot(hasSnapshot: boolean): void;
+  /** Why the last unlock was refused — the mismatch surfaces speak from this
+   *  rather than from a hardcoded sentence that is false half the time. */
+  keyRefusal: UnlockRefusal | null;
   /**
    * Remove one entry from this device and from every snapshot saved after
    * this. Resolves once the local removal has COMMITTED. Never touches
@@ -767,6 +770,7 @@ export function useJournalMemory(): JournalMemory {
       exportRecoveryKey: memoryKey.exportRecoveryKey,
       trust: memoryKey.trust,
       keyNotice: memoryKey.notice,
+      keyRefusal: memoryKey.refusal,
       reportSnapshot,
       undecryptableCount,
       persistFailureCount,
@@ -789,6 +793,7 @@ export function useJournalMemory(): JournalMemory {
       memoryKey.exportRecoveryKey,
       memoryKey.trust,
       memoryKey.notice,
+      memoryKey.refusal,
       reportSnapshot,
       undecryptableCount,
       persistFailureCount,

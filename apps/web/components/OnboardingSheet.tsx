@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { refusalMessage } from '@/lib/crypto/unlockCopy';
 import { useModalFocus } from '@/lib/hooks/useModalFocus';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 
@@ -149,9 +150,13 @@ export function OnboardingSheet({
         {keyState === 'mismatch' && (
           <>
             <p className="text-sm leading-relaxed text-caution">
-              This wallet produced a different signature than when your journal was encrypted, so
-              the derived key doesn&apos;t match. Nothing is lost — your entries are intact and
-              decrypt with your recovery key.
+              {/* Same correction as MemoryStrip: "your entries are intact" is
+                  false on the one mismatch path reachable when this device
+                  holds nothing, which is exactly when a fresh-device user hits
+                  this sheet. refusalMessage says the true thing per case. */}
+              {memory.keyRefusal
+                ? refusalMessage(memory.keyRefusal)
+                : 'This wallet produced a different signature than when your journal was encrypted, so the derived key doesn’t match. Unlock with your recovery key.'}
             </p>
             <RecoveryInput
               value={recoveryHex}

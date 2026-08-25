@@ -71,8 +71,6 @@ export interface Seal {
   resumable: boolean;
   begin(): void;
   close(): void;
-  /** Abandon an unresumable run. */
-  discard(): void;
   /** Step 1. Only reachable from 'idle' and 'save-failed'. */
   save(): Promise<void>;
   /** Step 2. Only reachable once the fresh receipt is in the rendered tree. */
@@ -203,17 +201,31 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
     setOpen(true);
   }
 
-  /** Throw the run away — the escape hatch when a run is unresumable. */
-  function discard() {
-    setRun(null);
-    setOpen(false);
-  }
-
   function close() {
     setOpen(false);
     // Keep the run while a signature is in flight or a step is still owed —
     // closing the sheet must not lose the fact that step 1 already cost money.
-    if (phase === 'sealed' || phase === 'already-sealed' || phase === 'idle') {
+    //
+    // 'unavailable' is NOT such a state, and leaving it here was a dead end.
+    // Every route to it means the run can no longer be matched to reality —
+    // an armed run whose receipt moved underneath it (which a restore-from-
+    // anchor does), or a confirmed anchor whose root is not the one we saved.
+    // sealPrimaryAction gives those phases no button but Close, so keeping the
+    // run meant `resumable` stayed true forever, which keeps "Save to 0G"
+    // disabled for the rest of the session. There WAS an escape hatch —
+    // `discard()`, documented as exactly that — and nothing ever called it, so
+    // the only real exits were a reload or disconnecting the wallet. Folded in
+    // here, where the one button the user is offered can reach it.
+    //
+    // Safe against the transient wallet-mismatch route: the effect above
+    // already clears the run on any wallet change, so that phase never survives
+    // into a settled render the user could click through.
+    if (
+      phase === 'sealed' ||
+      phase === 'already-sealed' ||
+      phase === 'idle' ||
+      phase === 'unavailable'
+    ) {
       setRun(null);
     }
   }
@@ -304,7 +316,6 @@ export function useSeal(memory: JournalMemory, companion: Companion): Seal {
     resumable,
     begin,
     close,
-    discard,
     save,
     anchor,
     switchChain,

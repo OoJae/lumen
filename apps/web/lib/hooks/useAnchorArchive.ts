@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
 import { LUMEN_COMPANION_DEPLOY_BLOCK, type ZgNetworkKey } from '@lumen/shared';
@@ -128,6 +128,19 @@ export function useAnchorArchive(companion: Companion): AnchorArchive {
   const partial =
     chain !== null && expectedAnchors !== null && chain.links.length < expectedAnchors;
 
+  /**
+   * Stable across renders, and that is load-bearing rather than tidy.
+   *
+   * This used to be `() => void query.refetch()` — a fresh arrow every render.
+   * PracticeArchive opens with `useEffect(() => { refetch() }, [refetch])`, so
+   * the effect re-armed on every render, refetched, re-rendered, and re-armed:
+   * a refetch loop hammering the RPC for as long as the archive was open.
+   * TanStack's own `query.refetch` is already stable, so wrapping it is all
+   * that was ever needed.
+   */
+  const queryRefetch = query.refetch;
+  const refetch = useCallback(() => void queryRefetch(), [queryRefetch]);
+
   const status: AnchorArchive['status'] = !enabled
     ? 'idle'
     : query.isError || partial
@@ -146,6 +159,6 @@ export function useAnchorArchive(companion: Companion): AnchorArchive {
     // once the chain has been read COMPLETELY. An incomplete read that looks
     // empty must not become "nothing here is sealed yet".
     everSealed: status === 'ok' && chain ? chain.practiceDays.length > 0 : null,
-    refetch: () => void query.refetch(),
+    refetch,
   };
 }

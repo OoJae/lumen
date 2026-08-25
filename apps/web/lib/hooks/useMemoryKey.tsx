@@ -69,6 +69,7 @@ import {
   type KcvStatus,
   type KeyEvidence,
   type KeyTrust,
+  type UnlockRefusal,
   type UnlockSource,
 } from '@/lib/crypto/keyTrust';
 import { refusalMessage, unlockNotice, type UnlockNotice } from '@/lib/crypto/unlockCopy';
@@ -110,6 +111,16 @@ export interface MemoryKeyContextValue {
    * green; the defect was entirely in the wiring.
    */
   reportSnapshot(hasSnapshot: boolean): void;
+  /**
+   * Why the last unlock was refused, or null.
+   *
+   * `refusalMessage` has a branch for each, and one of them exists precisely to
+   * avoid claiming "your data is intact" on a device that holds none — which is
+   * what `signature-mismatch-kcv` always means. Both mismatch surfaces
+   * hardcoded that claim anyway, so the sentence the copy module was written to
+   * delete was the only one a user ever saw.
+   */
+  refusal: UnlockRefusal | null;
   /** Explicit user action: sign → derive → check against real data → unlocked. */
   unlock(): Promise<void>;
   lock(): void;
@@ -197,18 +208,34 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
   const wallet = address ? address.toLowerCase() : null;
 
   const keyRef = useRef<CryptoKey | null>(null);
+  /**
+   * The live wallet, readable from a callback that must never be re-created.
+   *
+   * `confirmKeyProven` used to close over the `wallet` variable, which made it
+   * change identity on every connect. useJournalMemory calls it from inside
+   * `hydrate` and `restoreFromRoot` — useCallbacks whose dependency arrays hold
+   * only render-stable values — so both permanently ran the FIRST render's
+   * copy, captured before any wallet existed, which returned immediately at
+   * `if (!key || !wallet)`. The promotion never happened: a fresh-device
+   * recovery unlock stayed `asserted` even after a snapshot decrypted, and the
+   * UI kept telling the user to restore something they had just restored.
+   */
+  const walletRef = useRef<string | null>(null);
+  walletRef.current = wallet;
   const [state, setState] = useState<MemoryKeyState>('no-wallet');
   const [trust, setTrust] = useState<KeyTrust | null>(null);
   /** Which path admitted the live key. Half of what the notice is derived from. */
   const [source, setSource] = useState<UnlockSource | null>(null);
   /** Whether this wallet has a journal somewhere else — the other half. */
   const [hasSnapshot, setHasSnapshot] = useState(false);
+  const [refusal, setRefusal] = useState<UnlockRefusal | null>(null);
 
   // Wallet switch or disconnect → drop the key immediately.
   useEffect(() => {
     keyRef.current = null;
     setTrust(null);
     setSource(null);
+    setRefusal(null);
     // Per-wallet, like everything else here: the previous wallet's journal says
     // nothing about this one's.
     setHasSnapshot(false);
@@ -241,6 +268,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
         keyRef.current = null;
         setTrust(null);
         setSource(null);
+        setRefusal(decision.refusal);
         setState(decision.nextState);
         throw new Error(refusalMessage(decision.refusal));
       }
@@ -254,6 +282,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       keyRef.current = candidate;
       setTrust(decision.trust);
       setSource(source);
+      setRefusal(null);
       setState('unlocked');
     },
     [],
@@ -291,21 +320,27 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
     [wallet, admit],
   );
 
+  // Deps are EMPTY on purpose — see walletRef. A cross-hook callback that
+  // changes identity is a callback that gets captured stale.
   const confirmKeyProven = useCallback(async () => {
     const key = keyRef.current;
-    if (!key || !wallet) return;
+    const forWallet = walletRef.current;
+    // A wallet switch nulls keyRef, so a confirm racing one no-ops here rather
+    // than stamping the new wallet's KCV with the old wallet's key.
+    if (!key || !forWallet) return;
     // `unlockNotice` returns null for a proven key, so the notice clears itself.
     setTrust((prev) => (prev === 'proven' ? prev : 'proven'));
     // Stamped `proven`: this key just opened real wallet-bound ciphertext, so a
     // later unlock on this device may rely on it. This is the ONLY place a
     // bootstrap KCV is promoted, and it takes an actual decrypt to get here.
-    await createKcv(wallet, key, 'proven').catch(() => {});
-  }, [wallet]);
+    await createKcv(forWallet, key, 'proven').catch(() => {});
+  }, []);
 
   const lock = useCallback(() => {
     keyRef.current = null;
     setTrust(null);
     setSource(null);
+    setRefusal(null);
     setState(wallet ? 'locked' : 'no-wallet');
   }, [wallet]);
 
@@ -338,6 +373,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       keyVersion: CURRENT_KEY_VERSION,
       trust,
       notice,
+      refusal,
       unlock,
       lock,
       exportRecoveryKey,
@@ -351,6 +387,7 @@ export function MemoryKeyProvider({ children }: { children: ReactNode }) {
       wallet,
       trust,
       notice,
+      refusal,
       unlock,
       lock,
       exportRecoveryKey,

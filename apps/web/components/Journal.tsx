@@ -81,13 +81,29 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   }, [memory.wallet]);
   const { text, attestation, status, error, reflect, reset } = useStreamingReflection();
 
-  const prompt = useMemo(() => promptOfTheDay(), []);
+  // Keyed to the day, not to the mount. Both this and the date label used to be
+  // computed once at page load, in a component this file documents as never
+  // remounting — so a session left open across midnight kept yesterday's
+  // heading and yesterday's prompt over today's entry.
+  const [dayKey, setDayKey] = useState(() => new Date().toDateString());
+  const prompt = useMemo(() => promptOfTheDay(), [dayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // The date must render identically on server and client or React bails out
   // of hydration (#418): the server's locale/timezone is not the reader's.
   // Render the deterministic UTC form first, then correct to local after mount.
+  // UTC for the server render so hydration matches, then the local date once
+  // we are in the browser.
   const [dateLabel, setDateLabel] = useState(() => formatJournalDate(new Date(), 'UTC'));
   useEffect(() => {
-    setDateLabel(formatJournalDate(new Date()));
+    function sync() {
+      const now = new Date();
+      setDateLabel(formatJournalDate(now));
+      setDayKey(now.toDateString());
+    }
+    sync();
+    // Once a minute is enough to cross midnight promptly without being a timer
+    // anyone notices, and it also catches a laptop waking from sleep.
+    const id = setInterval(sync, 60_000);
+    return () => clearInterval(id);
   }, []);
 
   const streaming = status === 'streaming';
@@ -209,12 +225,19 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
               streaming={streaming}
               onOpenAttestation={(a) => setViewer(a)}
             />
-            {status === 'error' && (
-              <p className="mt-2 text-sm text-red-500">
-                {error ?? 'Something went wrong'} — please try again.
-              </p>
-            )}
           </div>
+        )}
+
+        {/* OUTSIDE `activeEntry`, which is the whole point: the failure path
+            sets activeEntry to null in the same batch that useStreamingReflection
+            sets status to 'error', so nested here this never rendered. A failed
+            reflection was silent — the button reverted, the words stayed in the
+            box, and the gateway's own explanation was thrown away. */}
+        {status === 'error' && (
+          <p className="mt-4 rounded-xl border border-caution/40 bg-caution/10 px-3 py-2 text-sm leading-relaxed text-caution">
+            {error ?? 'Something went wrong'} — your words are still in the box, so nothing was
+            lost. Try again.
+          </p>
         )}
 
         {past.length > 0 && (

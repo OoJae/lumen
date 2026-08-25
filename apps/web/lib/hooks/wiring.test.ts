@@ -90,3 +90,65 @@ describe('the unlock notice can actually reach its hasSnapshot branch', () => {
     }
   });
 });
+
+describe('hooks are called unconditionally', () => {
+  // A hook after an early return runs on some renders and not others, and React
+  // throws "rendered more hooks than during the previous render" the moment the
+  // condition flips. StorageReceiptViewer shipped exactly that: the focus-trap
+  // hook was inserted below `if (!receipt) return null;`, so it would have
+  // crashed the dialog the first time a receipt arrived.
+  //
+  // Scoped per top-level function — one file holds several components, and an
+  // early return in the first says nothing about hooks in the second.
+  const COMPONENTS = join(process.cwd(), 'components');
+
+  function bodies(src: string): Array<{ name: string; body: string }> {
+    const heads = [...src.matchAll(/^(?:export )?function (\w+)\(/gm)];
+    return heads.map((h, i) => ({
+      name: h[1]!,
+      body: src.slice(h.index!, i + 1 < heads.length ? heads[i + 1]!.index! : src.length),
+    }));
+  }
+
+  it.each(readdirSync(COMPONENTS).filter((f) => f.endsWith('.tsx')))(
+    '%s calls no hook after an early return',
+    (file) => {
+      const offenders: string[] = [];
+      for (const { name, body } of bodies(readFileSync(join(COMPONENTS, file), 'utf8'))) {
+        // Component bodies sit at 2-space indent; nested helpers are deeper.
+        const early = /^ {2}if \([^\n]*\)\s*return\b/m.exec(body);
+        if (!early) continue;
+        for (const m of body.slice(early.index).matchAll(/^ {2}const .*?= (use[A-Z]\w*)[<(]/gm)) {
+          offenders.push(`${name}:${m[1]!}`);
+        }
+      }
+      expect(offenders, `${file}: hook(s) after an early return — ${offenders.join(', ')}`).toEqual(
+        [],
+      );
+    },
+  );
+});
+
+describe('cross-hook callbacks stay stable', () => {
+  // useJournalMemory calls memoryKey.confirmKeyProven() from inside useCallbacks
+  // whose dep arrays hold only render-stable values. Any callback on the key
+  // context that changes identity is therefore captured on the FIRST render —
+  // before a wallet exists — and silently no-ops forever. confirmKeyProven did
+  // exactly that: a fresh-device recovery unlock never got promoted to 'proven'
+  // even after a snapshot decrypted, so the UI kept asking for a restore the
+  // user had already done.
+  const src = readFileSync(join(HOOKS, 'useMemoryKey.tsx'), 'utf8');
+
+  it.each(['confirmKeyProven', 'reportSnapshot', 'getKey'])(
+    '%s is memoised with an empty dependency array',
+    (name) => {
+      const at = src.indexOf(`const ${name} = useCallback(`);
+      expect(at, `${name}: not a useCallback`).toBeGreaterThan(-1);
+      // The deps are the last bracketed list before the call closes. Take the
+      // next `}, [...]);` or, for a one-liner, the trailing `, [...]);`.
+      const deps = /,\s*(\[[^\]]*\])\s*\);/.exec(src.slice(at));
+      expect(deps, `${name}: could not read deps`).not.toBeNull();
+      expect(deps![1]!.replace(/\s/g, ''), `${name} deps`).toBe('[]');
+    },
+  );
+});

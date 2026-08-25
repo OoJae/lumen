@@ -52,9 +52,13 @@ export function StorageReceiptViewer({
     };
   }, [onClose]);
 
-  if (!receipt) return null;
-
+  // ABOVE the early return: a hook called after one runs on some renders and
+  // not others, and React throws "rendered more hooks than during the previous
+  // render" the moment `receipt` arrives. Every other dialog happens to have no
+  // early return, which is why this was the only one.
   const panelRef = useModalFocus<HTMLDivElement>();
+
+  if (!receipt) return null;
 
   return (
     <div
