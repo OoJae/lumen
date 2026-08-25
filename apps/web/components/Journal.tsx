@@ -38,7 +38,16 @@ function formatJournalDate(date: Date, timeZone?: string): string {
   });
 }
 
-export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?: boolean }) {
+export function Journal({
+  live,
+  demoAllowed = true,
+  voiceLive = false,
+}: {
+  live: boolean;
+  /** Whether a missing credential would fall back to the demo, or refuse. */
+  demoAllowed?: boolean;
+  voiceLive?: boolean;
+}) {
   const memory = useJournalMemory();
   // Owned here, passed to MemoryStrip, and read by the delete dialog — which
   // needs to know whether a root is anchored to say what deleting can and
@@ -184,7 +193,7 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
           voiceLive={voiceLive}
         />
 
-        <TrustLine live={live} />
+        <TrustLine live={live} demoAllowed={demoAllowed} />
 
         <ChainGuardBanner />
 
@@ -367,13 +376,29 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
   );
 }
 
-function TrustLine({ live }: { live: boolean }) {
+function TrustLine({ live, demoAllowed }: { live: boolean; demoAllowed: boolean }) {
   if (live) {
     return (
       <p className="mt-3 flex items-center gap-1.5 text-xs text-muted">
         <LockIcon width={12} height={12} />
         Every reflection is checked in your browser against the enclave&apos;s signature — no wallet
         needed. Tap the badge on any reply to inspect the proof.
+      </p>
+    );
+  }
+  // No credential. Whether that means "demo" or "broken" is not a property of
+  // the credential — it is a property of the environment, and this used to
+  // promise mocks on a production deploy where mayServeDemo() refuses to serve
+  // one and every reflection answers 503.
+  if (!demoAllowed) {
+    return (
+      <p className="mt-3 flex items-start gap-1.5 text-xs text-caution">
+        <LockIcon width={12} height={12} className="mt-0.5 shrink-0" />
+        <span>
+          Inference is not configured on this deployment, so reflections are unavailable. Lumen
+          will not invent one in their place. Set{' '}
+          <code className="font-mono">ZG_COMPUTE_API_KEY</code> to enable Sealed Inference.
+        </span>
       </p>
     );
   }

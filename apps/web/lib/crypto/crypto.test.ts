@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { deriveAesKey, deriveKeyMaterial, getKeyDerivationMessage, hexToBytes } from './keys';
+import {
+  bytesToHex,
+  deriveAesKey,
+  deriveKeyMaterial,
+  getKeyDerivationMessage,
+  hexToBytes,
+} from './keys';
 import {
   encryptString,
   decryptString,
@@ -75,5 +81,50 @@ describe('base64 helpers', () => {
   it('round-trip arbitrary bytes including 0 and 255', () => {
     const bytes = new Uint8Array([0, 1, 2, 127, 128, 254, 255]);
     expect(Array.from(base64ToBytes(bytesToBase64(bytes)))).toEqual([0, 1, 2, 127, 128, 254, 255]);
+  });
+});
+
+describe('hexToBytes rejects a mistyped recovery key', () => {
+  // A recovery key is transcribed by hand more often than it is pasted, and the
+  // classic slip is a capital O for a zero. The per-byte Number.isNaN guard
+  // could not catch that in the SECOND nibble of a pair, because parseInt
+  // truncates at the first invalid character instead of returning NaN:
+  // parseInt('bO', 16) === 11. The result was 32 bytes of the right length with
+  // one silently wrong byte — a key that looks valid and opens nothing.
+  const GOOD = 'b0'.repeat(32);
+
+  it('still accepts a real key, with or without 0x', () => {
+    expect(hexToBytes(GOOD)).toHaveLength(32);
+    expect(hexToBytes(`0x${GOOD}`)).toHaveLength(32);
+    expect(Array.from(hexToBytes('00ff10'))).toEqual([0, 255, 16]);
+  });
+
+  it('THE BUG: rejects a bad SECOND nibble instead of fabricating a byte', () => {
+    const typo = 'b0'.repeat(31) + 'bO'; // capital O for zero, last position
+    expect(() => hexToBytes(typo)).toThrow(/Invalid hex/);
+  });
+
+  it('rejects a bad FIRST nibble too — the case that always worked', () => {
+    expect(() => hexToBytes('b0'.repeat(31) + 'Ob')).toThrow(/Invalid hex/);
+  });
+
+  it('rejects non-hex anywhere in the string', () => {
+    for (const bad of ['zz', 'b0 b0', 'b0-b0', '00ff1g', 'b0 b0']) {
+      expect(() => hexToBytes(bad), bad).toThrow(/Invalid hex/);
+    }
+  });
+
+  it('still rejects an odd length, with its own message', () => {
+    expect(() => hexToBytes('abc')).toThrow(/odd length/);
+  });
+
+  it('accepts an empty string, which callers length-check themselves', () => {
+    // unlockWithRecoveryKey enforces 32 bytes; this function only decodes.
+    expect(hexToBytes('')).toHaveLength(0);
+  });
+
+  it('round-trips with bytesToHex', () => {
+    const bytes = new Uint8Array([0, 1, 15, 16, 127, 128, 254, 255]);
+    expect(Array.from(hexToBytes(bytesToHex(bytes)))).toEqual(Array.from(bytes));
   });
 });

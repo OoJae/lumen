@@ -44,7 +44,7 @@ attestation viewer → session memory → wallet "save & own" stub.**
 - ✅ 0G Compute Router inference in **private trust mode** through a thin gateway (a Next.js Route Handler that holds the API key).
 - ✅ **🔒 Verified private** badge on every reflection + an honest attestation viewer (TEE hardware, model, the `ZG-Res-Key` proof reference, and exactly what is/isn't proven in Wave 1).
 - ✅ In-session memory (recent turns become model context).
-- ✅ **Demo mode**: with no API key set, the loop still runs against a clearly-labeled mock (badge reads *"Demo — not live TEE"*) so it's always clickable.
+- ✅ **Demo mode (local dev and previews only)**: with no API key set, the loop still runs against a clearly-labeled mock (badge reads *"Demo — not live TEE"*). A **production** deploy without a credential answers 503 instead — `mayServeDemo()` refuses to serve a fabricated reflection under a privacy promise.
 - ✅ Client-side **AES-GCM + wallet-signature key-derivation** crypto foundation, unit-tested (wired into storage in Wave 2).
 
 Not in Wave 1 (by design): Storage persistence, INFT minting, payments — those are Waves 2–4.
@@ -209,7 +209,7 @@ set `PRIVATE_KEY` in `contracts/.env` (use a **deploy-only hot wallet**) and run
 
 ### Deploy (Vercel)
 - Root directory: `apps/web` · Install: `pnpm install --frozen-lockfile` · Build: `pnpm --filter @lumen/web build`.
-- Set `ZG_COMPUTE_API_KEY` (and optional `ZG_COMPUTE_MODEL`) in Vercel project env. Without it, the deployment runs in demo mode. Add `ZG_VOICE_API_KEY` to enable voice.
+- Set `ZG_COMPUTE_API_KEY` (and optional `ZG_COMPUTE_MODEL`) in Vercel project env. **This is required for a production deploy** — without it every reflection answers 503 rather than falling back to the mock, which is deliberate: a demo label is not enough cover for serving a fabricated reflection under a hardware-enclave promise. Add `ZG_VOICE_API_KEY` to enable voice.
 
 ## Honesty (the moat is *provable* privacy — so we don't overclaim)
 

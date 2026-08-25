@@ -131,12 +131,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     // The one mock in this codebase, and it is now genuinely unreachable in
     // production rather than merely documented as such. See lib/0g/env.ts.
     if (!mayServeDemo()) {
-      return Response.json(
-        {
-          error:
-            'Lumen is not configured for inference right now. No reflection was generated — ' +
-            'nothing was invented in its place.',
-        },
+      // Plain text, like every other error branch on this route (429/400/413/502).
+      // useStreamingReflection reads failures with res.text() — its own comment
+      // says "the gateway answers ... with plain-text prose" — so a JSON body
+      // rendered a literal {"error":"..."} blob into the UI.
+      return new Response(
+        'Lumen is not configured for inference right now. No reflection was generated — ' +
+          'nothing was invented in its place.',
         { status: 503, headers: { 'Cache-Control': 'no-store' } },
       );
     }

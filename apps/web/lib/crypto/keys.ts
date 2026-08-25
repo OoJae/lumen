@@ -42,11 +42,19 @@ export function bytesToHex(bytes: Uint8Array): string {
 export function hexToBytes(hex: string): Uint8Array {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
   if (clean.length % 2 !== 0) throw new Error('Invalid hex string (odd length)');
+  // Validate the WHOLE string up front. The per-byte `Number.isNaN` guard below
+  // cannot catch a bad second nibble: `parseInt` truncates at the first invalid
+  // character rather than returning NaN, so `parseInt('bO', 16)` is 11, not NaN.
+  // Someone transcribing their recovery key and typing a capital O for zero got
+  // 32 bytes with a silently wrong one — right length, right shape, wrong key.
+  // That matters more since `refuted-data-unproven` (see lib/crypto/keyTrust.ts)
+  // can ADMIT a recovery key on a device holding only unproven ciphertext: a
+  // typo would be accepted and start encrypting new entries under a key the
+  // user does not have written down anywhere.
+  if (!/^[0-9a-fA-F]*$/.test(clean)) throw new Error('Invalid hex string');
   const out = new Uint8Array(clean.length / 2);
   for (let i = 0; i < out.length; i++) {
-    const byte = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-    if (Number.isNaN(byte)) throw new Error('Invalid hex string');
-    out[i] = byte;
+    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
 }
