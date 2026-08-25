@@ -51,12 +51,25 @@ export const ATTESTATION_NOTE_DEMO =
   'locally as a mock. It did NOT run inside a TEE. Configure a 0G Compute token for real ' +
   'Sealed Inference.';
 
-/** Pre-verification (or verification unavailable): trust-mode only. */
+/**
+ * Pre-verification, or verification unavailable.
+ *
+ * This used to open "Processed through the provider's secure enclave in private
+ * trust mode." The last four words were unearned: `X-0G-Provider-Trust-Mode`
+ * appears nowhere in this codebase, the 0G SDK never sends it either, and the
+ * provider's own credential path carries only `Authorization`. So the app was
+ * naming a request mode it does not request.
+ *
+ * What IS true, and is what this now says: the provider is registered on-chain
+ * as running the model inside a TEE, and that registration — not a header — is
+ * where the enclave property comes from. The rest is the honest caveat that
+ * THIS response was not checked.
+ */
 export function buildTrustModeNote(disclosure?: ProviderDisclosure, reason?: string): string {
   const tail = reason
-    ? `Cryptographic verification of this specific response was unavailable (${reason}).`
-    : 'Cryptographic verification of this specific response is pending.';
-  return `Processed through the provider's secure enclave in private trust mode. ${providerDisclosure(disclosure)} ${tail}`;
+    ? `This specific response was NOT cryptographically verified (${reason}), so it rests on that registration rather than on a proof.`
+    : 'Cryptographic verification of this specific response is still running.';
+  return `This provider is registered on-chain as running the model inside a secure enclave. ${providerDisclosure(disclosure)} ${tail}`;
 }
 
 /** Verified: the strongest honest sentence we can write. */
@@ -89,7 +102,9 @@ export function buildLiveAttestation(
 ): AttestationInfo {
   return {
     verificationStatus: 'attested-by-trust-mode',
-    trustMode: 'private',
+    // 'unspecified' because Lumen specifies no trust mode. Saying 'private'
+    // here described a header that is not sent — see buildTrustModeNote.
+    trustMode: 'unspecified',
     teeType: TEE_HARDWARE.cpu,
     teeHardware: TEE_HARDWARE.gpu,
     model: opts.model,
@@ -166,7 +181,13 @@ export function statusPresentation(status: VerificationStatus): {
     case 'verified':
       return { label: 'Cryptographically verified', tone: 'verified' };
     case 'attested-by-trust-mode':
-      return { label: 'Verified private', tone: 'verified' };
+      // NOT 'verified', and no longer says so. This is the state where
+      // per-request verification did not complete, so the only thing standing
+      // behind the reflection is the provider's on-chain registration. Labelling
+      // that "Verified private" in the verified tone was the largest overclaim
+      // in the app, and it sat on the fallback path — the one a judge on a flaky
+      // connection is most likely to see.
+      return { label: 'Enclave — this one unverified', tone: 'muted' };
     case 'pending-crypto-proof':
       return { label: 'Verifying…', tone: 'muted' };
     case 'demo':

@@ -10,7 +10,11 @@ export interface ChatMessage {
 
 /**
  * What "Verified private" means for a given response — kept deliberately honest.
- *  - attested-by-trust-mode: Wave 1 Router path. Request ran in private trust mode
+ *  - attested-by-trust-mode: per-request verification did not complete, so all
+ *    that stands behind the response is the provider's ON-CHAIN registration as
+ *    a TEE service. Lumen sends no trust-mode header — nothing does; the 0G SDK
+ *    dropped every custom billing header in favour of `Authorization` alone —
+ *    so this state must never be presented as verified.
  *    inside the TEE; no per-request cryptographic proof is checkable on the hosted
  *    Router (it abstracts away the providerAddress).
  *  - pending-crypto-proof / verified: Wave 3 Direct-SDK path, where the broker's
