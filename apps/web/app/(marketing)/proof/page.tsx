@@ -46,17 +46,17 @@ export default function ProofPage() {
 
   const claims: Claim[] = [
     {
-      claim: 'This reflection came out of a hardware enclave.',
+      claim: 'This reflection came out of an attested enclave session.',
       proven:
         'Your browser fetches the enclave signature for the response, hashes the exact bytes it received, recovers the signing address, and compares it to the TEE signer that provider registered on-chain. All three have to agree. It runs for every visitor, with no wallet — tap the badge on any reply to watch it.',
       notProven:
-        'That Lumen never saw your words. For the duration of a reflection the request passes through Lumen’s own server in the clear, and that is disclosed here, in the privacy model, and in the app. Verification catches tampering; it does not remove us from the path.',
+        'That only the enclave saw your words. Two parties do. Lumen’s own server relays the prompt in the clear for the length of the call. And our provider’s on-chain record reads `centralized / aliyun` — the enclave is a sealed proxy attesting the request, response and TLS session to an upstream model host, which processes your words inside that session. The enclave operator cannot read them; the upstream host does. Verification catches tampering; it does not shorten that list.',
       check: { label: 'Read the privacy model', href: 'https://github.com/OoJae/lumen/blob/main/docs/privacy-model.md', external: true },
     },
     {
       claim: 'What Lumen stores, it cannot read.',
       proven:
-        'Entries are encrypted on your device with AES-GCM before anything is written or uploaded — you can watch it happen on the home page, and you can open DevTools on the journal and find nothing but base64 in IndexedDB. The key comes from one wallet signature and never leaves the browser.',
+        'Entries are encrypted on your device with AES-GCM before anything is written or uploaded — you can watch it happen on the home page, and you can open DevTools on the journal and read the store yourself: every entry and every embedding is ciphertext. What sits beside them in the clear is bookkeeping, not content — ids, timestamps, deletion markers and the storage pointer that is already public on 0G. The key comes from one wallet signature and never leaves the browser.',
       notProven:
         'That the encryption is unbreakable, or that you cannot lose the key. Lose both your wallet and your recovery key and the journal is gone — there is no reset, because a reset is just a back door with better manners.',
       check: { label: 'Watch it encrypt', href: '/' },

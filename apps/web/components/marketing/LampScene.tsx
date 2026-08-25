@@ -131,7 +131,7 @@ function Falloff({ progress }: { progress: MutableRefObject<number> }) {
   const uniforms = useMemo(
     () => ({
       uProgress: { value: 0 },
-      uAspect: { value: 1 },
+      uResolution: { value: new THREE.Vector2(1, 1) },
       uCore: { value: new THREE.Color('#fbbf24') },
       uBody: { value: new THREE.Color('#b45309') },
     }),
@@ -144,7 +144,12 @@ function Falloff({ progress }: { progress: MutableRefObject<number> }) {
     // Indexed access, so TS cannot prove the keys exist even though `uniforms`
     // above defines them; read once and guard rather than asserting per line.
     if (u.uProgress) u.uProgress.value = progress.current;
-    if (u.uAspect) u.uAspect.value = state.viewport.aspect;
+    // DRAWING BUFFER pixels, not CSS pixels. `gl_FragCoord` is in device
+    // pixels, so feeding it state.size on a 1.75x display put every coordinate
+    // 1.75x out of range: `d` overshot the reach everywhere and the lamp
+    // computed to zero across the whole viewport. It looked exactly like a
+    // scene that had failed to mount.
+    if (u.uResolution) state.gl.getDrawingBufferSize(u.uResolution.value);
   });
 
   const vertexShader = `
@@ -159,21 +164,26 @@ function Falloff({ progress }: { progress: MutableRefObject<number> }) {
     precision highp float;
     varying vec2 vUv;
     uniform float uProgress;
-    uniform float uAspect;
+    uniform vec2 uResolution;
     uniform vec3 uCore;
     uniform vec3 uBody;
 
     void main() {
-      vec2 p = (vUv - vec2(0.5, 0.53)) * vec2(uAspect, 1.0);
+      // SCREEN space, not the plane's UV. The plane is 24x24 world units and
+      // the camera only ever sees a slice of it, so a radius expressed in UV
+      // meant something different at every aspect — on a portrait phone the
+      // visible slice was small enough that the "pool" filled the viewport.
+      // The grain below already used gl_FragCoord; this file carried both
+      // conventions and only one of them was measuring real pixels.
+      float aspect = uResolution.x / uResolution.y;
+      vec2 p = gl_FragCoord.xy / uResolution - vec2(0.5, 0.47);
+      p.x *= aspect;
       float d = length(p);
 
       // A POOL, not a wash. The first version ran at 0.9 alpha across a reach
       // of 0.95 and turned the whole viewport orange, which destroyed the
       // typography the page exists for. A lamp is mostly the dark around it.
-      // Radius is measured in height units, so on a 375-wide phone a 0.62 reach
-      // is 500px across a 375px screen — a wash, not a pool. Tie it to the
-      // narrow axis so the lamp stays the same shape at every aspect.
-      float reach = mix(0.62, 0.30, uProgress) * clamp(uAspect, 0.55, 1.0);
+      float reach = mix(0.62, 0.30, uProgress) * clamp(aspect, 0.55, 1.0);
       float glow = pow(1.0 - smoothstep(0.0, reach, d), 2.6);
 
       // A hotter centre, or amber at low alpha reads as a stain rather than a
@@ -184,7 +194,7 @@ function Falloff({ progress }: { progress: MutableRefObject<number> }) {
       // Film grain, fixed to screen space so it reads as the room's texture
       // rather than noise crawling across a gradient.
       float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-      float alpha = glow * 0.34 + (n - 0.5) * 0.04 * glow;
+      float alpha = glow * 0.26 + (n - 0.5) * 0.04 * glow;
 
       gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
     }
@@ -205,12 +215,14 @@ function Falloff({ progress }: { progress: MutableRefObject<number> }) {
   );
 }
 
-export default function LampScene({ progress }: { progress: number }) {
-  // Held in a ref so scroll updates drive the render loop without re-rendering
-  // the React tree sixty times a second.
-  const value = useRef(progress);
-  value.current = progress;
-
+export default function LampScene({
+  progressRef,
+}: {
+  progressRef: MutableRefObject<number>;
+}) {
+  // The ref arrives already populated by the parent, so nothing here re-renders
+  // on scroll — and crucially <Canvas> receives no changing prop, which is what
+  // used to make r3f re-run its root render on every frame.
   return (
     <Canvas
       camera={{ position: [0, 0, 4.2], fov: 42 }}
@@ -226,8 +238,8 @@ export default function LampScene({ progress }: { progress: number }) {
       {/* Rim, from behind and above — the edge light that tells you the arms
           have thickness. Without it the bevel is only ever a darker amber. */}
       <pointLight position={[-1.5, 2.5, -2]} intensity={14} color="#fde68a" distance={9} decay={2} />
-      <Falloff progress={value} />
-      <Mark progress={value} />
+      <Falloff progress={progressRef} />
+      <Mark progress={progressRef} />
     </Canvas>
   );
 }

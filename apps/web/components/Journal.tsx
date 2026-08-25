@@ -445,6 +445,17 @@ function SiteFooter() {
           privacy. Built on 0G: TEE inference verified in your browser, encrypted memory on 0G
           Storage, and an ERC-7857 companion you own.
         </p>
+        {/* Where the marketing pages live now. Plain links in the footer, not a
+            logo in the header: crossing into the (marketing) group unmounts the
+            providers and re-locks the journal, so it must look like leaving. */}
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          <a href="/how-it-works" className="hover:text-ink hover:underline">
+            How it works
+          </a>
+          <a href="/proof" className="hover:text-ink hover:underline">
+            Check it yourself
+          </a>
+        </p>
         {/* Verifiable, not decorative: same frozen network object the uploader reads. */}
         <p className="mt-1.5">
           Running on <span className="font-medium text-ink">{net.label}</span> · chain{' '}

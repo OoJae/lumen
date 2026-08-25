@@ -44,11 +44,11 @@ const STEPS: Step[] = [
   {
     n: '02',
     title: 'It reflects',
-    lede: 'Inside a hardware enclave, and your browser checks the receipt.',
+    lede: 'Inside an attested enclave session, and your browser checks the receipt.',
     detail:
-      'Your entry goes to a 0G Compute provider running the model inside a TEE, so the operator of that hardware cannot read it. Then the interesting part: your browser fetches the enclave’s signature, hashes the exact bytes it received, recovers the signer, and compares it to the address that provider registered on-chain. Tap the badge on any reply to see all three checks and the recovered address.',
+      'Your entry goes to a 0G Compute provider whose enclave signs exactly what it returns. Then the interesting part: your browser fetches that signature, hashes the exact bytes it received, recovers the signer, and compares it to the address the provider registered on-chain. Tap the badge on any reply to see all three checks, the recovered address, and — read from the provider’s own on-chain record rather than from us — who is inside the session.',
     limit:
-      'For the length of that call, the request passes through Lumen’s own server in the clear. Verification proves the reply was not altered; it does not mean nobody saw the prompt. Removing us from that path needs browser-direct inference, which is designed and not shipped.',
+      'Two parties see the prompt that we cannot remove. Lumen’s own server relays it in the clear for the length of the call. And our current provider’s on-chain record reads `centralized / aliyun`: the enclave is a sealed proxy that attests the request, the response and its TLS session to an upstream model host, and that host processes your words inside the attested session. The enclave operator cannot read them; the upstream host does. Verification proves the reply was not altered — it does not shorten that list.',
   },
   {
     n: '03',

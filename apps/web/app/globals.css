@@ -130,7 +130,11 @@ body {
 :where(a, button, input, textarea, select, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: inherit;
+  /* No `border-radius: inherit` here. It looked like a way to make the ring
+     follow a pill, but `inherit` takes the PARENT's radius, not the element's —
+     so a rounded-full button inside a square container squared off the moment
+     it received focus. Modern browsers already draw `outline` following the
+     element's own border-radius, which is what was wanted. */
 }
 
 /* The marketing surfaces are always night.
@@ -141,6 +145,20 @@ body {
 html:has(.lumen-night) {
   background: #100f0c;
   color-scheme: dark;
+}
+
+/* Secondary text is lifted on the marketing surfaces, and this is a contrast
+   fix rather than a taste one.
+   
+   The lamp composites amber UNDER the copy it is lighting, so the effective
+   background for text in the pool is not --canvas but roughly rgb(76,52,12).
+   The app's --muted (#9a8f80) measures 6.04:1 on the dark canvas and only
+   3.67:1 inside the pool — below the 4.5 floor for normal text, on the eyebrow
+   and the hero subhead, which sit nearest the brightest part. #b5a898 measures
+   5.00:1 in the pool and 8.23:1 outside it, so it clears AA everywhere the
+   lamp can reach. The journal keeps the original value: it has no lamp. */
+.lumen-night {
+  --muted: #b5a898;
 }
 
 /* Headline lines lift into a mask. Reveals by LINE, not by letter — a

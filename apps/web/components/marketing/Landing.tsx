@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useScrollScene } from '@/lib/hooks/useScrollScene';
 import { CipherReveal } from './CipherReveal';
@@ -25,6 +25,17 @@ const LampScene = dynamic(() => import('./LampScene'), { ssr: false });
 export function Landing() {
   const { ref, progress, reduced } = useScrollScene<HTMLDivElement>();
   const [lampReady, setLampReady] = useState(false);
+
+  /**
+   * The scroll value reaches the scene through a REF, never a prop.
+   *
+   * Passing `progress` as a prop re-rendered <Canvas> on every scroll frame,
+   * and r3f re-runs its configure + root.render on each of those — so the
+   * "held in a ref so scroll does not re-render the tree" comment inside
+   * LampScene was being defeated by the prop sitting next to it.
+   */
+  const progressRef = useRef(0);
+  progressRef.current = progress;
 
   // Mount the canvas a beat after paint. `requestIdleCallback` where it exists,
   // because the headline should win the main thread first.
@@ -50,7 +61,10 @@ export function Landing() {
           `-z-10` keeps it behind text without taking it out of the stacking
           context that the header sits above. */}
       <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-        {lampReady && <LampScene progress={progress} />}
+        {/* `!reduced` here as well as at mount: the media query has a change
+            listener, and without this a visitor who turns reduced motion ON
+            mid-visit kept a spinning scene. */}
+        {lampReady && !reduced && <LampScene progressRef={progressRef} />}
       </div>
 
       {/* ── 01 OPEN ─────────────────────────────────────────────────────── */}
@@ -189,7 +203,7 @@ const STEPS = [
   },
   {
     title: 'It reflects',
-    body: 'Your entry runs inside a hardware enclave, and your browser checks the enclave signature over the exact bytes it received. Tap the badge on any reply to inspect that proof yourself.',
+    body: 'Your entry is processed inside an attested enclave session, and your browser checks the enclave’s signature over the exact bytes it received. Tap the badge on any reply for the proof — and for who is inside that session, read from the provider’s own on-chain record.',
   },
   {
     title: 'You seal it',

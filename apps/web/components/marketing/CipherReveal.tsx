@@ -69,12 +69,23 @@ export function CipherReveal({ progress, reduced }: { progress: number; reduced:
     };
   }, [sentence]);
 
-  /** The stored form, cut to the same character count so the swap is in place. */
+  /**
+   * The stored form, cut to the same character count so the swap is in place.
+   *
+   * CIPHERTEXT ONLY — not iv + ciphertext, which is what this used to build. A
+   * 12-byte IV is 16 base64 characters, so for any sentence of 16 characters or
+   * fewer EVERY character shown was the IV: a random nonce, not the encryption
+   * of anything the visitor typed, under a caption promising "your sentence
+   * through AES-GCM". Short sentences are exactly the ones people try first.
+   *
+   * Cycling rather than padding keeps the other half of the promise: every
+   * character on screen is a real ciphertext character, never filler invented
+   * to make the line long enough.
+   */
   const cipherLine = useMemo(() => {
     if (!blob) return '';
-    const body = (blob.iv + blob.ciphertext).replace(/=+$/, '');
-    // Cycle rather than pad: every character shown is a real ciphertext
-    // character, never filler invented to make the line long enough.
+    const body = blob.ciphertext.replace(/=+$/, '');
+    if (!body) return '';
     let out = '';
     while (out.length < sentence.length) out += body;
     return out.slice(0, sentence.length);
@@ -126,17 +137,36 @@ export function CipherReveal({ progress, reduced }: { progress: number; reduced:
             <span className="text-accent">{cipherLine.slice(0, cut)}</span>
             <span className="text-ink/85">{sentence.slice(cut)}</span>
           </>
-        ) : (
+        ) : blob ? (
           /* No sweep to watch, so show the finished thing rather than the
              starting state. Cutting to `cut` here left the plaintext sitting
              under a caption describing an encryption that never visibly
              happened — the accommodation quietly turning the claim false. */
-          <span className="text-accent">{blob ? blob.iv + blob.ciphertext : sentence}</span>
+          <span className="text-accent">{blob.iv + blob.ciphertext}</span>
+        ) : (
+          /* Nothing encrypted yet. Show the sentence in the INK colour, never
+             the accent — the amber is what says "this is ciphertext", and the
+             caption below is gated on the same condition so it cannot describe
+             a blob that does not exist. */
+          <span className="text-ink/85">{sentence}</span>
         )}
       </p>
 
-      {/* The accessible text. Always the sentence, never the base64. */}
-      <p className="sr-only">{sentence}</p>
+      {/*
+        The accessible rendering.
+
+        This used to be the bare sentence, sitting directly under a heading
+        reading "What gets stored" — so a screen reader announced "What gets
+        stored: I keep thinking about the thing I did not say", which is the
+        precise opposite of what the demo exists to show. It still never reads
+        the base64 (a wall of announced random characters helps nobody); it
+        describes it instead.
+      */}
+      <p className="sr-only">
+        {blob
+          ? `Your sentence, “${sentence}”, is stored as ${blob.ciphertext.length} characters of AES-GCM ciphertext. The encrypted form is shown visually in place of the text.`
+          : `Your sentence: “${sentence}”. Encrypting…`}
+      </p>
 
       <p className="mt-6 text-xs leading-relaxed text-muted">
         {failed ? (
@@ -153,8 +183,10 @@ export function CipherReveal({ progress, reduced }: { progress: number; reduced:
                 are seeing the first {sentence.length} characters of the blob rather than all of
                 it.
               </>
-            ) : (
+            ) : blob ? (
               <>That is the whole blob — initialisation vector and ciphertext.</>
+            ) : (
+              <>Encrypting it now.</>
             )}{' '}
             The key is a throwaway for this demo. In the journal it comes from one wallet
             signature, it never leaves your device, and Lumen never receives it.

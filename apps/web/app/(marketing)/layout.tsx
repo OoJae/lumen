@@ -1,4 +1,16 @@
-import { Instrument_Serif, IBM_Plex_Mono } from 'next/font/google';
+import type { Viewport } from 'next';
+import { Instrument_Serif } from 'next/font/google';
+
+/**
+ * These pages are night whatever the reader's theme is, so the browser chrome
+ * has to be too. The root layout exports a media-keyed pair that resolves to
+ * cream for a light-mode visitor, which painted a cream status bar over a black
+ * page. A child segment's viewport overrides it for this subtree only.
+ */
+export const viewport: Viewport = {
+  themeColor: '#100f0c',
+  colorScheme: 'dark',
+};
 
 /**
  * Everything a stranger can read without connecting anything.
@@ -19,9 +31,15 @@ import { Instrument_Serif, IBM_Plex_Mono } from 'next/font/google';
  * variables — the journal keeps its zero-webfont system stacks.
  *
  * Instrument Serif is the display voice: high contrast, tight-set, a title page
- * rather than a headline. IBM Plex Mono is the evidence voice — humanist enough
- * to sit beside an old-style serif without arguing, and the correct register for
- * a hash you are being invited to check.
+ * rather than a headline.
+ *
+ * There was a second face here — IBM Plex Mono, as an "evidence voice" for the
+ * ciphertext. It was 35 KB that rendered ZERO glyphs. `@theme inline` in
+ * globals.css inlines the literal system mono stack into `.font-mono`, so a
+ * `--font-mono` override on this wrapper could never reach the utility class,
+ * and every mono character on the site was already being drawn in the system
+ * face. Which means the design signed off in review WAS the system face. Two
+ * preloaded woff2 files for a typeface nobody ever saw.
  */
 const display = Instrument_Serif({
   subsets: ['latin'],
@@ -31,20 +49,8 @@ const display = Instrument_Serif({
   display: 'swap',
 });
 
-const mono = IBM_Plex_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500'],
-  variable: '--font-plex-mono',
-  display: 'swap',
-});
-
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={`dark lumen-night min-h-dvh bg-canvas ${display.variable} ${mono.variable}`}
-      style={{ '--font-mono': 'var(--font-plex-mono)' } as React.CSSProperties}
-    >
-      {children}
-    </div>
+    <div className={`dark lumen-night min-h-dvh bg-canvas ${display.variable}`}>{children}</div>
   );
 }
