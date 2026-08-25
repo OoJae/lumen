@@ -7,6 +7,8 @@
  */
 import type { ChatMessage, JournalTurn } from '@lumen/shared';
 
+import { ELISION, minimizeRecall } from './minimize';
+
 /** How many prior turns to feed back as context. */
 export const MAX_CONTEXT_TURNS = 6;
 
@@ -55,17 +57,46 @@ export function buildContextWithRecall(
   }
 
   if (recalled.length > 0) {
-    const block = recalled
-      .map((turn) => `[${turn.createdAt.slice(0, 10)}] ${turn.entry}`)
-      .join('\n\n');
-    preamble.push({
-      role: 'system',
-      content:
-        'Earlier entries from this journal, in the writer\'s own words — quietly ' +
-        'draw on them when they are relevant:\n\n' +
-        block,
-    });
+    // EXCERPTS, not whole entries. Recall picks an entry by whole-entry cosine
+    // similarity and this used to forward the whole entry — so a long, hard
+    // entry travelled in full because one paragraph of it rhymed with today's
+    // sentence. The gateway is in the plaintext path for the inference call, so
+    // that difference is the difference between it seeing a paragraph and it
+    // seeing a year. See lib/memory/minimize.ts.
+    const minimized = minimizeRecall(recalled, (turn) => turn.entry, newEntry);
+    if (minimized.entries > 0) {
+      const block = minimized.items
+        .map(({ item, excerpt }) => `[${item.createdAt.slice(0, 10)}] ${excerpt.text}`)
+        .join('\n\n');
+      preamble.push({
+        role: 'system',
+        content:
+          "Excerpts from earlier entries in this journal, in the writer's own words. " +
+          `${ELISION} marks where text was deliberately withheld — do not ask about ` +
+          'the gaps or guess at them. Quietly draw on what is here when it is ' +
+          'relevant:\n\n' +
+          block,
+      });
+    }
   }
 
   return preamble.length > 0 ? [...preamble, ...base] : base;
+}
+
+/**
+ * What this reflection will actually send, in counts — for the composer notice.
+ * Kept beside the builder so the two can never drift: if one changes what goes
+ * out, the other reports it.
+ */
+export function contextFootprint(
+  turns: JournalTurn[],
+  recalled: JournalTurn[],
+  newEntry: string,
+): { sessionTurns: number; recalledEntries: number; charsWithheld: number } {
+  const minimized = minimizeRecall(recalled, (turn) => turn.entry, newEntry);
+  return {
+    sessionTurns: Math.min(turns.length, MAX_CONTEXT_TURNS),
+    recalledEntries: minimized.entries,
+    charsWithheld: minimized.charsWithheld,
+  };
 }

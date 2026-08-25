@@ -59,18 +59,42 @@ inference call.**
 - **But the prompt for a live call CONTAINS stored memory, in plaintext, and
   the gateway sees it.** This deserves stating plainly, because an earlier
   version of this document said the opposite. Every reflection sends: your new
-  entry, the **last 6 entries and their reflections** (the session window,
-  `lib/memory/session.ts`), and up to **4 more entries selected by on-device
-  recall** — which may be from any point in your history, including entries
-  restored from a 0G snapshot months later. So on a routine reflection the
-  gateway receives up to ten previously-stored journal entries as cleartext.
-  You can see this yourself: DevTools → Network → `/api/reflect` → Payload.
+  entry, and the **last 6 entries and their reflections** (the session window,
+  `lib/memory/session.ts`). You can see this yourself: DevTools → Network →
+  `/api/reflect` → Payload.
+- **Recalled entries are now excerpted, not forwarded whole.** Up to 4 older
+  entries are still selected by on-device recall, and they can come from any
+  point in your history — including entries restored from a 0G snapshot months
+  later. But recall picks an entry by *whole-entry* similarity, and this
+  document used to describe the consequence accurately: the whole entry went.
+  So a long, hard entry travelled in full because one paragraph of it rhymed
+  with today's sentence. `lib/memory/minimize.ts` now cuts each recalled entry
+  down to the sentences that earned its place — at most 3, and at most ~420
+  characters — before it leaves the device, marking the gaps with `…` and
+  telling the model not to speculate about them. In tests on realistic entries
+  that withholds more than half the recalled text. It is a reduction, not
+  encryption: what is sent, the gateway still sees.
+- **The app now tells you what it sent.** After each reflection the composer
+  states the counts — how many recent entries, how many excerpts, and roughly
+  how many characters stayed on this device. `contextFootprint` is computed by
+  the same module that builds the payload, so the two cannot drift.
 - What that does *not* mean: the gateway keeps none of it, logs no content, and
   cannot read anything at rest. What it does mean: for the duration of an
   inference call, "encrypted end-to-end" describes storage, not the prompt.
 - Removing the gateway from that path needs browser-direct, wallet-signed
-  inference. It is designed and not shipped. Until it is, this is the honest
-  boundary of the claim.
+  inference. It is buildable — the credential is a client-mintable signed blob,
+  not a server secret, and the provider's CORS allows it — but it was
+  **considered and rejected** for this product, and the reasoning belongs here
+  rather than in a commit message. It would remove exactly one party (this
+  gateway) from the plaintext audience, while the enclave and the upstream model
+  host read the prompt either way. In exchange it would hand the provider your
+  wallet address and IP — de-anonymising prompts the gateway currently pools —
+  and publish two things on a public chain: an enumerable roster of everyone
+  who uses Lumen (a live `getAccountsByProvider` read returns real user
+  addresses), and a per-request settlement trail that amounts to a timestamped
+  public record of when and how much you journal. For a journal, that trades a
+  private party you can verify for a public record you cannot retract. Until
+  something changes that arithmetic, the gateway stays — smaller, and disclosed.
 - This limitation is **labeled in-app** (the attestation viewer) and here.
 
 **We therefore do _not_ claim full end-to-end-private inference in Waves 1–2.**

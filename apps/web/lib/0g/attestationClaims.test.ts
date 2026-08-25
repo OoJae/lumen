@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -131,13 +131,16 @@ describe('the unverified path must never present itself as verified', () => {
     // The whole justification for dropping "private trust mode" is that nothing
     // sends the header. If that changes, these assertions need rethinking
     // rather than silently continuing to pass.
-    const sources = ['../0g/compute.ts', '../../app/api/reflect/route.ts'].map((rel) => {
+    const sources = ['lib/0g/compute.ts', 'app/api/reflect/route.ts'].map((rel) => {
       try {
-        return readFileSync(join(__dirname, rel), 'utf8');
+        return readFileSync(join(process.cwd(), rel), 'utf8');
       } catch {
         return '';
       }
     });
+
+    // If both reads failed the assertions below would pass vacuously.
+    expect(sources.filter((s) => s.length > 0)).toHaveLength(2);
     for (const src of sources) {
       expect(src).not.toContain('X-0G-Provider-Trust-Mode');
     }

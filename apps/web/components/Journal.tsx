@@ -24,8 +24,9 @@ import { activeNetwork } from '@/lib/0g/network';
 import { useJournalMemory } from '@/lib/hooks/useJournalMemory';
 import { useStreamingReflection } from '@/lib/hooks/useStreamingReflection';
 import { preloadEmbedder } from '@/lib/memory/embeddings';
+import { contextNotice } from '@/lib/memory/minimize';
 import { recallRelevant } from '@/lib/memory/recall';
-import { buildContextWithRecall, newTurnId } from '@/lib/memory/session';
+import { buildContextWithRecall, contextFootprint, newTurnId } from '@/lib/memory/session';
 import { promptOfTheDay } from '@/lib/prompts';
 
 function formatJournalDate(date: Date, timeZone?: string): string {
@@ -108,6 +109,18 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
 
   const streaming = status === 'streaming';
   const turns = memory.turns;
+  /**
+   * What the last reflection actually sent, in counts only.
+   *
+   * docs/privacy-model.md invites the reader to open DevTools and inspect the
+   * /api/reflect payload. That invitation is honest and almost nobody takes it,
+   * so this says the same thing where it is actually read.
+   */
+  const [lastFootprint, setLastFootprint] = useState<{
+    sessionTurns: number;
+    recalledEntries: number;
+    charsWithheld: number;
+  } | null>(null);
 
   // Warm the on-device embedder once the user actually journals (anon users
   // included), so recall never cold-starts on the submit path.
@@ -125,6 +138,10 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
       // Recall reaches beyond the session window; it is budgeted (2.5s) and
       // failure-proof — the reflection always starts promptly.
       const recalled = await recallRelevant(entry, turns);
+      // What actually left the device, in counts — shown after the reflection
+      // so the claim in the composer can be checked against the real send
+      // rather than taken on trust.
+      setLastFootprint(contextFootprint(turns, recalled, entry));
       const result = await reflect(buildContextWithRecall(turns, recalled, entry, prompt));
       if (result && result.text) {
         const turnRecall = recalled;
@@ -233,6 +250,10 @@ export function Journal({ live, voiceLive = false }: { live: boolean; voiceLive?
             sets status to 'error', so nested here this never rendered. A failed
             reflection was silent — the button reverted, the words stayed in the
             box, and the gateway's own explanation was thrown away. */}
+        {lastFootprint && !streaming && (
+          <p className="mt-2 text-xs leading-relaxed text-muted">{contextNotice(lastFootprint)}</p>
+        )}
+
         {status === 'error' && (
           <p className="mt-4 rounded-xl border border-caution/40 bg-caution/10 px-3 py-2 text-sm leading-relaxed text-caution">
             {error ?? 'Something went wrong'} — your words are still in the box, so nothing was
