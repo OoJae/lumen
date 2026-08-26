@@ -31,9 +31,20 @@ describe('the system prompt may not overclaim privacy', () => {
     expect(p).toContain('do not tell them lumen itself is unable to see');
   });
 
-  it('still states the enclave property, which IS true', () => {
-    expect(p).toContain('hardware enclave');
+  it('still states the enclave property, in the form that is true', () => {
+    // "hardware enclave" alone was the old assertion, and it went stale the day
+    // the phrasing was corrected: for our centralized/aliyun provider the model
+    // runs at an UPSTREAM HOST and the enclave attests the session around it.
+    // Assert the property, not the retired wording.
+    expect(p).toContain('attested enclave session');
     expect(p).toContain('cannot read them');
+  });
+
+  it('forbids the model from claiming it runs inside the enclave', () => {
+    // The prompt is a claim surface: whatever it says here, the model can
+    // repeat aloud to someone who asks how private this really is.
+    expect(p).toContain('do not say the model itself runs inside the enclave');
+    expect(p).toContain('upstream host');
   });
 
   it('discloses the gateway rather than omitting it', () => {
