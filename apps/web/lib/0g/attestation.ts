@@ -79,7 +79,13 @@ export function buildTrustModeNote(disclosure?: ProviderDisclosure, reason?: str
   const tail = reason
     ? `This specific response was NOT cryptographically verified (${reason}), so it rests on that registration rather than on a proof.`
     : 'Cryptographic verification of this specific response is still running.';
-  return `This provider is registered on-chain as running the model inside a secure enclave. ${providerDisclosure(disclosure)} ${tail}`;
+  // Opens with the REGISTRATION, not with a description of where the model
+  // runs — the previous wording ("registered on-chain as running the model
+  // inside a secure enclave") was immediately contradicted by the very next
+  // sentence, which correctly says the model runs at an upstream host. Two
+  // adjacent sentences disagreeing is worse than either one alone, and it
+  // shipped in the dialog this product points at as its proof.
+  return `This provider is registered on-chain as a TEE service, with a signing key this app checks against. ${providerDisclosure(disclosure)} ${tail}`;
 }
 
 /** Verified: the strongest honest sentence we can write. */

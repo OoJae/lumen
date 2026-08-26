@@ -148,3 +148,34 @@ describe('the unverified path must never present itself as verified', () => {
     expect(compute).toContain('PRIVATE_MODE_HEADER');
   });
 });
+
+describe('the attestation note may not contradict itself', () => {
+  // It did, in the dialog this product points at as its proof: the note opened
+  // "registered on-chain as running the model inside a secure enclave" and the
+  // very next sentence — correctly — said the model runs at an upstream host.
+  // Two adjacent sentences disagreeing is worse than either alone.
+  const CENTRALIZED = { providerType: 'centralized', providerIdentity: 'aliyun' };
+
+  it('does not place the model in the enclave for a centralized provider', () => {
+    const note = buildLiveAttestation({ ...OPTS, disclosure: CENTRALIZED }, 'the provider no longer serves this signature').note;
+    expect(note).toContain('upstream host');
+    expect(/registered on-chain as running the model inside/i.test(note)).toBe(false);
+  });
+
+  it('says the same thing on the verified path', () => {
+    const note = buildVerifiedAttestation({ ...OPTS, disclosure: CENTRALIZED }, PROOF, true).note;
+    expect(note).toContain('upstream host');
+    expect(/the model runs inside the enclave/i.test(note)).toBe(false);
+  });
+
+  it('still credits a genuinely in-enclave provider when there is one', () => {
+    // The honest counterpart: if a provider's record says the model runs in the
+    // enclave, the copy must be free to say so.
+    const note = buildVerifiedAttestation(
+      { ...OPTS, disclosure: { providerType: 'tee', providerIdentity: 'phala' } },
+      PROOF,
+      true,
+    ).note;
+    expect(note).toContain('runs inside the enclave itself');
+  });
+});
