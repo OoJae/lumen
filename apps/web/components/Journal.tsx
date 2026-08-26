@@ -426,7 +426,7 @@ function EmptyState() {
         A private place to think. No wallet needed to begin.
       </p>
       <ol className="max-w-sm space-y-1.5 text-xs leading-relaxed text-muted">
-        <li>1 · Write freely — reflections run inside a hardware enclave.</li>
+        <li>1 · Write freely — every reply is checked in your browser against the enclave&apos;s signature.</li>
         <li>2 · Tap the 🔒 badge on any reply to inspect the proof.</li>
         <li>3 · When it&apos;s worth keeping: one signature encrypts your journal with a key only
           your wallet holds, and saves it to 0G — yours, provably.</li>

@@ -20,18 +20,39 @@ import { describe, expect, it } from 'vitest';
  * what gets checked.
  */
 
+/**
+ * The whole user-visible surface, not just the marketing pages.
+ *
+ * The first version of this guard covered app/(marketing) and
+ * components/marketing only — and the app itself then said the retired thing in
+ * THREE places that shipped: the attestation viewer's verified subtitle, the
+ * journal's onboarding list, and the system prompt the model speaks from. A
+ * scope that stops at the marketing folder is a guard that watches the door
+ * while the window is open.
+ */
 const MARKETING = [
-  join(process.cwd(), 'app', '(marketing)'),
-  join(process.cwd(), 'components', 'marketing'),
+  join(process.cwd(), 'app'),
+  join(process.cwd(), 'components'),
+  join(process.cwd(), 'lib', 'prompts.ts'),
 ];
 
 function sources(): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   const walk = (dir: string) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      // A file path rather than a directory — read it directly.
+      out.push([dir.replace(process.cwd(), ''), readFileSync(dir, 'utf8')]);
+      return;
+    }
+    for (const e of entries) {
       const full = join(dir, e.name);
       if (e.isDirectory()) walk(full);
-      else if (/\.tsx?$/.test(e.name)) out.push([full.replace(process.cwd(), ''), readFileSync(full, 'utf8')]);
+      else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) {
+        out.push([full.replace(process.cwd(), ''), readFileSync(full, 'utf8')]);
+      }
     }
   };
   MARKETING.forEach(walk);

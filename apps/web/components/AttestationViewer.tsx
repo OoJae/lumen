@@ -76,7 +76,12 @@ export function AttestationViewer({
                 {isAlarm
                   ? 'The signature did not match these bytes'
                   : tone === 'verified'
-                    ? 'Processed inside a hardware enclave'
+                    ? // The old subtitle put the model itself in the enclave. Our provider's
+                      // on-chain record is centralized/aliyun: the enclave attests
+                      // the session, the upstream host does the processing. The
+                      // note below this already says so correctly — the subtitle
+                      // was contradicting it two lines up.
+                      'Checked in your browser against the on-chain signer'
                     : tone === 'muted'
                       ? // NOT "Checking the enclave signature…". That was written when
                         // muted meant "in progress"; since verification became the
