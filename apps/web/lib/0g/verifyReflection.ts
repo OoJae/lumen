@@ -64,8 +64,20 @@ export interface VerifyReflectionInput {
   providerAddress?: string | null;
 }
 
-/** Total budget for verification — never let it hold up the UI. */
-const VERIFY_BUDGET_MS = 5_000;
+/**
+ * Total budget for verification.
+ *
+ * Was 5s, and it was losing. Measured against the live provider: the signer
+ * lookup takes 2.2–2.5s and the signature fetch 1.7–3.0s, both inside this one
+ * budget — so a real reflection needs 3.9–5.5s and roughly half of them were
+ * aborted mid-flight. The product's headline claim was failing on a coin flip,
+ * and the failure was silent because the fallback state is a legitimate one.
+ *
+ * Raising it costs nothing the user can feel: this runs AFTER the stream has
+ * drained, with the reflection already on screen and readable. The budget
+ * exists so verification cannot hang forever, not to make it fast.
+ */
+const VERIFY_BUDGET_MS = 15_000;
 
 export async function verifyAndBuildAttestation(
   input: VerifyReflectionInput,
@@ -99,8 +111,19 @@ export async function verifyAndBuildAttestation(
     let proof;
     try {
       proof = await fetchTeeSignature(providerUrl, input.chatId, input.model, controller.signal);
-    } catch {
-      return buildLiveAttestation(opts, 'the provider no longer serves this signature');
+    } catch (err) {
+      // Do not blame the provider for OUR abort. This branch used to report
+      // "the provider no longer serves this signature" for every failure
+      // including a budget timeout — which was the common case, and which sent
+      // anyone investigating to the wrong system entirely. The provider was
+      // serving the signature correctly the whole time.
+      const aborted = err instanceof DOMException && err.name === 'AbortError';
+      return buildLiveAttestation(
+        opts,
+        aborted
+          ? 'the check did not finish in time on this connection'
+          : 'the provider no longer serves this signature',
+      );
     }
 
     const verdict = await verifyTeeProof(proof, input.rawBytes, signer.teeSignerAddress);

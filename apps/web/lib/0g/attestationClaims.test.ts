@@ -179,3 +179,31 @@ describe('the attestation note may not contradict itself', () => {
     expect(note).toContain('runs inside the enclave itself');
   });
 });
+
+describe('verification is given long enough to finish', () => {
+  /**
+   * Measured against the live provider on 2026-08-26: the signer lookup takes
+   * 2.2–2.5s and the signature fetch 1.7–3.0s, and BOTH run inside this single
+   * budget. At 5s roughly half of all reflections were aborted mid-check and
+   * fell back to the unverified state — the product's headline claim failing on
+   * a coin flip, silently, because the fallback is a legitimate-looking state.
+   *
+   * Nothing user-facing waits on this: it runs after the stream has drained,
+   * with the reflection already on screen.
+   */
+  const src = readFileSync(join(process.cwd(), 'lib/0g/verifyReflection.ts'), 'utf8');
+
+  it('allows more than the worst measured round trip', () => {
+    const m = /const VERIFY_BUDGET_MS = ([\d_]+)/.exec(src);
+    expect(m, 'could not read the budget').not.toBeNull();
+    const ms = Number(m![1]!.replace(/_/g, ''));
+    // Worst observed: 2.5s + 3.0s = 5.5s. Anything at or under that is a
+    // budget that loses on a normal connection.
+    expect(ms).toBeGreaterThan(6_000);
+  });
+
+  it('does not blame the provider for our own timeout', () => {
+    expect(src).toContain('AbortError');
+    expect(src).toContain('did not finish in time');
+  });
+});
